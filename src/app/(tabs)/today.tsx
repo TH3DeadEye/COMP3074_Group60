@@ -48,7 +48,7 @@ export default function TodayScreen() {
             <Icon
               name={syncing ? 'refresh' : 'check'}
               size={16}
-              color={syncing ? '#3A4250' : '#17663A'}
+              color={syncing ? '#3A4250' : colors.success}
               strokeWidth={2.2}
             />
             <Text style={[styles.syncText, syncing && { color: '#3A4250' }]}>{syncing ? 'Syncing' : 'Synced'}</Text>
@@ -230,9 +230,9 @@ const styles = StyleSheet.create({
     height: 32,
     paddingHorizontal: 12,
     borderRadius: 16,
-    backgroundColor: '#DDF0E3',
+    backgroundColor: colors.successBg,
   },
-  syncText: { fontFamily: fonts.semibold, fontSize: 14, color: '#17663A' },
+  syncText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.success },
   roundButton: {
     width: 48,
     height: 48,
@@ -301,8 +301,8 @@ const styles = StyleSheet.create({
     minHeight: 56,
     paddingHorizontal: 16,
     borderRadius: 16,
-    backgroundColor: '#DDF0E3',
+    backgroundColor: colors.successBg,
   },
   inlineRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  completedText: { fontFamily: fonts.semibold, fontSize: 16, color: '#17663A' },
+  completedText: { fontFamily: fonts.semibold, fontSize: 16, color: colors.success },
 });

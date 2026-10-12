@@ -21,6 +21,10 @@ export const colors = {
   mapWater: '#C9DCEB',
   selectedBg: '#FFFBEA',
   doneMarker: '#1E7A46',
+  success: '#17663A',
+  successBg: '#DDF0E3',
+  danger: '#A82A14',
+  dangerBg: '#FBE1DC',
   distance: '#1847A8',
   scrim: 'rgba(21, 23, 26, 0.6)',
 };

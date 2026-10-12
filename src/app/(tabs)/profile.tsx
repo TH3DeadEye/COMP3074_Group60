@@ -131,8 +131,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 16,
-    backgroundColor: '#DDF0E3',
+    backgroundColor: colors.successBg,
   },
-  syncedTitle: { fontFamily: fonts.bold, fontSize: 16, color: '#17663A' },
-  syncedBody: { fontFamily: fonts.regular, fontSize: 14, color: '#17663A' },
+  syncedTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.success },
+  syncedBody: { fontFamily: fonts.regular, fontSize: 14, color: colors.success },
 });
