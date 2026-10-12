@@ -53,7 +53,7 @@ export default function LoginScreen() {
             </View>
           </View>
           <Text style={styles.heroTitle} accessibilityRole="header">
-            Sign in to see today's pickups
+            Sign in to see today&apos;s pickups
           </Text>
         </View>
 
@@ -107,7 +107,7 @@ export default function LoginScreen() {
           {showError && (
             <View accessibilityRole="alert" style={styles.error}>
               <Icon name="alert" size={20} color="#A82A14" strokeWidth={2.2} />
-              <Text style={styles.errorText}>Wrong email or password, or this isn't a driver account.</Text>
+              <Text style={styles.errorText}>Wrong email or password, or this isn&apos;t a driver account.</Text>
             </View>
           )}
 
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: colors.ink,
   },
-  inputError: { borderColor: '#A82A14' },
+  inputError: { borderColor: colors.danger },
   eye: {
     position: 'absolute',
     right: 4,
@@ -185,9 +185,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 12,
-    backgroundColor: '#FBE1DC',
+    backgroundColor: colors.dangerBg,
   },
-  errorText: { flex: 1, color: '#A82A14', fontSize: 15, fontFamily: fonts.semibold },
+  errorText: { flex: 1, color: colors.danger, fontSize: 15, fontFamily: fonts.semibold },
   help: { textAlign: 'center', fontSize: 15, color: colors.muted, fontFamily: fonts.regular },
   helpLink: { fontFamily: fonts.semibold, color: colors.ink, textDecorationLine: 'underline' },
   helpDetail: { textAlign: 'center', fontSize: 15, color: colors.ink, fontFamily: fonts.semibold },

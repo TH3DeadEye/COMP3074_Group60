@@ -90,7 +90,7 @@ export default function MapScreen() {
       <View style={[styles.topBar, { top: insets.top + 16 }]} pointerEvents="box-none">
         <View style={styles.titleCard}>
           <Text style={styles.title} accessibilityRole="header">
-            Today's route
+            Today&apos;s route
           </Text>
           <Text style={styles.titleMeta}>
             {pickups.length} stops · {doneCount} done

@@ -10,8 +10,8 @@ import { Icon, type IconName } from './Icon';
 const statusLook: Record<PickupStatus, { label: string; bg: string; fg: string; icon: IconName; iconStroke: number }> = {
   scheduled: { label: 'Scheduled', bg: '#E6E8EC', fg: '#3A4250', icon: 'clock', iconStroke: 2.4 },
   in_progress: { label: 'In progress', bg: '#DCE7FB', fg: '#1847A8', icon: 'play', iconStroke: 0 },
-  completed: { label: 'Completed', bg: '#DDF0E3', fg: '#17663A', icon: 'check', iconStroke: 2.8 },
-  missed: { label: 'Missed', bg: '#FBE1DC', fg: '#A82A14', icon: 'x', iconStroke: 3 },
+  completed: { label: 'Completed', bg: colors.successBg, fg: colors.success, icon: 'check', iconStroke: 2.8 },
+  missed: { label: 'Missed', bg: colors.dangerBg, fg: colors.danger, icon: 'x', iconStroke: 3 },
   cancelled: { label: 'Cancelled', bg: '#ECEBE7', fg: '#55595F', icon: 'cancelled', iconStroke: 2.4 },
 };
 
@@ -137,7 +137,7 @@ export function ProgressSegments({
       {pickups.map((p) => {
         let bg = colors.line;
         if (p.status === 'completed') bg = colors.doneMarker;
-        else if (p.status === 'missed') bg = '#A82A14';
+        else if (p.status === 'missed') bg = colors.danger;
         else if (p.id === nextId) bg = colors.hiVis;
         return <View key={p.id} style={{ flex: 1, height, borderRadius: height / 2, backgroundColor: bg }} />;
       })}
@@ -151,7 +151,7 @@ export function StopMarker({ pickup, isNext, onPress }: { pickup: Pickup; isNext
   const done = pickup.status === 'completed';
   const missed = pickup.status === 'missed' || pickup.status === 'cancelled';
   const size = isNext ? 48 : 36;
-  const bg = isNext ? colors.hiVis : done ? colors.doneMarker : missed ? '#A82A14' : colors.ink;
+  const bg = isNext ? colors.hiVis : done ? colors.doneMarker : missed ? colors.danger : colors.ink;
   const fg = isNext ? colors.ink : colors.surface;
   return (
     <Pressable

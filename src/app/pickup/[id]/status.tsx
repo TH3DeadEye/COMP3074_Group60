@@ -123,7 +123,7 @@ export default function UpdateStatusSheet() {
               <View style={{ gap: 16 }}>
                 <View style={{ gap: 8 }}>
                   <Text style={styles.fieldLabel}>
-                    Why was it missed? <Text style={{ color: '#A82A14' }}>Required</Text>
+                    Why was it missed? <Text style={{ color: colors.danger }}>Required</Text>
                   </Text>
                   <View style={styles.reasonWrap}>
                     {reasons.map((r) => {
