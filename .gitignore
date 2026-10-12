@@ -41,3 +41,6 @@ yarn-error.*
 
 # AI assistant instructions (local only)
 /AGENTS.md
+
+# IDE
+.idea/
