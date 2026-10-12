@@ -53,7 +53,7 @@ export default function LoginScreen() {
             </View>
           </View>
           <Text style={styles.heroTitle} accessibilityRole="header">
-            Sign in to see today's pickups
+            Sign in to see today&apos;s pickups
           </Text>
         </View>
 
@@ -107,7 +107,7 @@ export default function LoginScreen() {
           {showError && (
             <View accessibilityRole="alert" style={styles.error}>
               <Icon name="alert" size={20} color="#A82A14" strokeWidth={2.2} />
-              <Text style={styles.errorText}>Wrong email or password, or this isn't a driver account.</Text>
+              <Text style={styles.errorText}>Wrong email or password, or this isn&apos;t a driver account.</Text>
             </View>
           )}
 

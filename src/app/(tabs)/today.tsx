@@ -124,7 +124,7 @@ export default function TodayScreen() {
           <Card style={styles.allDone}>
             <Icon name="check" size={28} color="#17663A" strokeWidth={2.8} />
             <Text style={styles.allDoneTitle}>All stops handled</Text>
-            <Text style={styles.progressMuted}>Head back to the yard when you're ready.</Text>
+            <Text style={styles.progressMuted}>Head back to the yard when you&apos;re ready.</Text>
           </Card>
         )}
 
