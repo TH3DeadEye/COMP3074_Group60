@@ -1,6 +1,6 @@
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { useEffect, useState } from 'react';
-import { AccessibilityInfo, View, type ColorValue, type ViewProps } from 'react-native';
+import { AccessibilityInfo, Platform, View, type ColorValue, type ViewProps } from 'react-native';
 
 import { ANDROID_GLASS_AVAILABLE, AndroidGlass } from './AndroidGlass';
 
@@ -10,9 +10,12 @@ import { ANDROID_GLASS_AVAILABLE, AndroidGlass } from './AndroidGlass';
 const GLASS_SUPPORTED = isLiquidGlassAvailable();
 
 // Reduce Transparency is an iOS accessibility setting; people who turn it on should get a solid panel.
+// It only exists on iOS: Android has no such setting, and react-native-web doesn't implement the
+// call at all (it throws), so everywhere else we skip it.
 function useReduceTransparency() {
   const [reduce, setReduce] = useState(false);
   useEffect(() => {
+    if (Platform.OS !== 'ios') return;
     let mounted = true;
     AccessibilityInfo.isReduceTransparencyEnabled().then((value) => {
       if (mounted) setReduce(value);
