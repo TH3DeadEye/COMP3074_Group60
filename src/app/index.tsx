@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -136,6 +137,13 @@ export default function LoginScreen() {
             </Text>
           </Text>
           {showHelp && <Text style={styles.helpDetail}>Call dispatch on (416) 555-0142, 6am – 6pm.</Text>}
+
+          <Text style={styles.help}>
+            New driver?{' '}
+            <Text style={styles.helpLink} onPress={() => router.push('/signup')} accessibilityRole="link">
+              Create an account
+            </Text>
+          </Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

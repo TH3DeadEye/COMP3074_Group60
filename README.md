@@ -18,7 +18,7 @@ You need Node 20+ and npm.
 
 1. Put `google-services.json` (Firebase console > Project settings > Your apps > Android app) in the project root. The app reads its Firebase config from this file.
 2. In the Firebase console, enable **Authentication > Sign-in method > Email/Password**.
-3. Create a driver account under **Authentication > Users > Add user** in the console.
+3. Create an account with **Create an account** on the login screen (or under **Authentication > Users > Add user** in the console).
 
 ```bash
 npm install
@@ -46,6 +46,7 @@ npm run android
 ## Screens
 
 1. **Login** – work email and password
+   - **Sign up** – name, work email and password (linked from the login screen)
 2. **Today** – the day's pickups, what's up next, and sync status
 3. **Pickup details** – address, time window, job type, notes and history
 4. **Route map** – all of today's stops on a map

@@ -1,4 +1,11 @@
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, type User } from 'firebase/auth';
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  updateProfile,
+  type User,
+} from 'firebase/auth';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { auth } from '@/firebase';
@@ -14,6 +21,7 @@ type AuthState = {
   // True until Firebase has told us whether a saved session exists.
   initializing: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -37,6 +45,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       initializing,
       signIn: async (email, password) => {
         await signInWithEmailAndPassword(auth, email.trim(), password);
+      },
+      signUp: async (name, email, password) => {
+        const { user: created } = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        // The account exists and the user is signed in at this point. Saving the name is a
+        // nicety: if it fails, the profile just falls back to the email.
+        try {
+          await updateProfile(created, { displayName: name.trim() });
+          setUser(toAuthUser(created));
+        } catch {}
       },
       signOut: () => firebaseSignOut(auth),
     }),
@@ -81,6 +98,27 @@ export function signInErrorMessage(error: unknown): string {
       // Unexpected codes (e.g. an API key restricted to Android apps) are worth seeing in dev.
       if (__DEV__) console.warn('Sign-in failed:', code || error);
       return "Couldn't sign in. Try again.";
+  }
+}
+
+export function signUpErrorMessage(error: unknown): string {
+  const code = errorCode(error);
+  switch (code) {
+    case 'auth/email-already-in-use':
+      return 'An account with this email already exists. Try signing in instead.';
+    case 'auth/invalid-email':
+      return 'Enter a valid email address.';
+    case 'auth/weak-password':
+      return 'That password is too weak. Use at least 6 characters.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Wait a few minutes and try again.';
+    case 'auth/network-request-failed':
+      return 'No connection. Check your signal and try again.';
+    case 'auth/operation-not-allowed':
+      return NOT_ENABLED;
+    default:
+      if (__DEV__) console.warn('Sign-up failed:', code || error);
+      return "Couldn't create the account. Try again.";
   }
 }
 

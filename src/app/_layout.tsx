@@ -48,6 +48,7 @@ function RootNavigator() {
         {/* Signed out: only the login screen. Signing in/out swaps the groups and the router redirects. */}
         <Stack.Protected guard={!user}>
           <Stack.Screen name="index" />
+          <Stack.Screen name="signup" />
         </Stack.Protected>
         <Stack.Protected guard={!!user}>
           <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
