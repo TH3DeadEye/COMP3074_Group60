@@ -60,6 +60,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
               <Text
                 style={{
                   fontSize: 13,
+                  // A tight, explicit line box. Android pads text with extra font space above and
+                  // below, which made the icon + label group look shifted up inside the bar.
+                  lineHeight: 16,
+                  includeFontPadding: false,
+                  textAlign: 'center',
                   fontFamily: focused ? fonts.bold : fonts.medium,
                   color: focused ? colors.ink : colors.muted,
                 }}
@@ -96,7 +101,9 @@ const styles = StyleSheet.create({
   pill: {
     width: 64,
     height: 32,
-    borderRadius: 16,
+    // Deliberately more than half the height (16) so it is always a full pill. On Android a
+    // stylesheet radius of exactly 16 on this box was drawn with square corners.
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
