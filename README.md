@@ -47,7 +47,7 @@ Each signed-in driver only ever sees their own data, and the app updates live wh
 
 - **First sign-in:** if a driver has no pickups for today, the app files six demo pickups and their starting history under their account. This is a stand-in for dispatch. The `create` rules for `drivers` and `pickups` exist only for this and would be removed once a back end creates pickups.
 - **Status changes:** marking a pickup in progress, completed or missed updates the pickup and adds an audit-log row in a single atomic write. The pickup's "Status history" is built from those rows.
-- **Offline:** Firestore shows changes on screen straight away, but this version has no persistent offline queue yet, so a change made offline is lost if the app is closed before reconnecting.
+- **Offline:** a status change is saved on the phone first and shown straight away, marked "Waiting to sync". It is sent as soon as there is a connection, oldest first, even if the app was closed in between. Each change keeps the time the driver made it, and sending the same change twice can't create a duplicate audit row. The Today chip shows "N waiting" or "Offline", and the Profile card explains the state. Signing out with changes still waiting keeps them for that account's next sign-in.
 
 ## Scripts
 
@@ -82,6 +82,9 @@ src/
   data/pickups.tsx   pickups store: live Firestore subscriptions behind usePickups()
   data/pickupsRepo.ts  Firestore reads and writes (seed, status update + audit log)
   data/seed.ts       the demo pickups
+  data/syncQueue.ts  offline queue logic (order, retries, what to show while waiting)
+  data/queueStorage.ts  saves the queue on the phone
+  data/useOnline.ts  online/offline hook
   data/model.ts      shared types and date helpers
   firebase.ts        Firebase app, auth and Firestore setup
   theme.ts           colors, fonts and text styles
