@@ -54,7 +54,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
               }}
               style={styles.item}
             >
-              <View style={[styles.pill, focused && { backgroundColor: colors.hiVis }]}>
+              <View style={styles.pill}>
+                {/* Always drawn, only faded in for the active tab. Adding a background color to a
+                    view that didn't have one made Android drop its rounded corners. */}
+                <View style={[styles.pillFill, { opacity: focused ? 1 : 0 }]} />
                 <Icon name={tab.icon} size={22} color={focused ? colors.ink : colors.muted} />
               </View>
               <Text
@@ -101,10 +104,17 @@ const styles = StyleSheet.create({
   pill: {
     width: 64,
     height: 32,
-    // Deliberately more than half the height (16) so it is always a full pill. On Android a
-    // stylesheet radius of exactly 16 on this box was drawn with square corners.
-    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // The yellow highlight behind the active tab's icon.
+  pillFill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 16,
+    backgroundColor: colors.hiVis,
   },
 });
