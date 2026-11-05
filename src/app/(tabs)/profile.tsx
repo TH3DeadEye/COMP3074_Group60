@@ -10,13 +10,50 @@ import { colors, fonts, tabular, type } from '@/theme';
 
 // Screen 6 · Profile
 export default function ProfileScreen() {
-  const { pickups, lastSynced, driver, error } = usePickups();
+  const { pickups, lastSynced, driver, error, online, pendingCount } = usePickups();
   const { user, signOut } = useAuth();
   const { name, initials } = identityOf(user);
   const done = pickups.filter((p) => p.status === 'completed').length;
   const syncedAt = lastSynced
     ? `${String(lastSynced.getHours()).padStart(2, '0')}:${String(lastSynced.getMinutes()).padStart(2, '0')}`
     : null;
+
+  // The card under the details: the honest answer to "is my work safe?".
+  const card: { icon: IconName; bg: string; fg: string; title: string; body: string } = error
+    ? { icon: 'alert', bg: colors.dangerBg, fg: colors.danger, title: "Can't sync", body: error }
+    : pendingCount > 0
+      ? {
+          icon: 'clock',
+          bg: colors.note,
+          fg: colors.noteInk,
+          title: `${pendingCount} ${pendingCount === 1 ? 'update' : 'updates'} waiting to sync`,
+          body: online
+            ? 'Sending now…'
+            : "You're offline. They're saved on this phone and will be sent when you reconnect.",
+        }
+      : !online
+        ? {
+            icon: 'alert',
+            bg: '#E6E8EC',
+            fg: '#3A4250',
+            title: "You're offline",
+            body: 'Changes you make are saved on this phone and sent when you reconnect.',
+          }
+        : syncedAt
+          ? {
+              icon: 'cloudCheck',
+              bg: colors.successBg,
+              fg: '#17663A',
+              title: 'All changes synced',
+              body: `Status updates reach dispatch right away · last at ${syncedAt}`,
+            }
+          : {
+              icon: 'cloudCheck',
+              bg: colors.successBg,
+              fg: '#17663A',
+              title: 'Connecting…',
+              body: 'Waiting to hear from the server',
+            };
 
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
@@ -47,18 +84,11 @@ export default function ProfileScreen() {
           </InfoRow>
         </Card>
 
-        <View style={[styles.synced, error && { backgroundColor: colors.dangerBg }]}>
-          <Icon name={error ? 'alert' : 'cloudCheck'} size={22} color={error ? colors.danger : '#17663A'} />
+        <View style={[styles.synced, { backgroundColor: card.bg }]}>
+          <Icon name={card.icon} size={22} color={card.fg} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.syncedTitle, error && { color: colors.danger }]}>
-              {error ? "Can't sync" : syncedAt ? 'All changes synced' : 'Connecting…'}
-            </Text>
-            <Text style={[styles.syncedBody, error && { color: colors.danger }]}>
-              {error ??
-                (syncedAt
-                  ? `Status updates reach dispatch right away · last at ${syncedAt}`
-                  : 'Waiting to hear from the server')}
-            </Text>
+            <Text style={[styles.syncedTitle, { color: card.fg }]}>{card.title}</Text>
+            <Text style={[styles.syncedBody, { color: card.fg }]}>{card.body}</Text>
           </View>
         </View>
 

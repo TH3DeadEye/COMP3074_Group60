@@ -3,14 +3,14 @@ import { useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Icon } from '@/components/Icon';
+import { Icon, type IconName } from '@/components/Icon';
 import { AppButton, Card, JobTag, ProgressSegments, StatusChip } from '@/components/ui';
 import { navigationUrl, usePickups, type Pickup } from '@/data/pickups';
 import { colors, fonts, tabular, type } from '@/theme';
 
 // Screen 2 · Today's Pickups
 export default function TodayScreen() {
-  const { pickups, nextPickup, refresh, driver, syncing, loading, error } = usePickups();
+  const { pickups, nextPickup, refresh, driver, syncing, loading, error, online, pendingCount } = usePickups();
   const [showCompleted, setShowCompleted] = useState(false);
 
   const done = pickups.filter((p) => p.status === 'completed');
@@ -22,6 +22,15 @@ export default function TodayScreen() {
   const toGo = pickups.length - done.length - missed.length - closed.length;
 
   const onRefresh = () => void refresh();
+
+  // The chip in the header: what's going on with the data right now.
+  const sync: { label: string; icon: IconName; bg: string; fg: string } = syncing
+    ? { label: 'Syncing', icon: 'refresh', bg: '#E6E8EC', fg: '#3A4250' }
+    : pendingCount > 0
+      ? { label: `${pendingCount} waiting`, icon: 'clock', bg: colors.note, fg: colors.noteInk }
+      : !online
+        ? { label: 'Offline', icon: 'alert', bg: '#E6E8EC', fg: '#3A4250' }
+        : { label: 'Synced', icon: 'check', bg: colors.successBg, fg: colors.success };
 
   const openPickup = (p: Pickup) => router.push({ pathname: '/pickup/[id]', params: { id: p.id } });
 
@@ -37,14 +46,12 @@ export default function TodayScreen() {
           </Text>
         </View>
         <View style={styles.headerActions}>
-          <View style={[styles.syncChip, syncing && { backgroundColor: '#E6E8EC' }]}>
-            <Icon
-              name={syncing ? 'refresh' : 'check'}
-              size={16}
-              color={syncing ? '#3A4250' : colors.success}
-              strokeWidth={2.2}
-            />
-            <Text style={[styles.syncText, syncing && { color: '#3A4250' }]}>{syncing ? 'Syncing' : 'Synced'}</Text>
+          <View
+            accessibilityLabel={`Sync status: ${sync.label}`}
+            style={[styles.syncChip, { backgroundColor: sync.bg }]}
+          >
+            <Icon name={sync.icon} size={16} color={sync.fg} strokeWidth={2.2} />
+            <Text style={[styles.syncText, { color: sync.fg }]}>{sync.label}</Text>
           </View>
           <Pressable
             accessibilityRole="button"
