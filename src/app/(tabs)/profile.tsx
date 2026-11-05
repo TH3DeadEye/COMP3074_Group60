@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/Icon';
+import { useTabBarInset } from '@/components/TabBar';
 import { AppButton, Card, ProgressSegments } from '@/components/ui';
 import { identityOf, useAuth } from '@/data/auth';
 import { usePickups } from '@/data/pickups';
@@ -12,6 +13,7 @@ import { colors, fonts, tabular, type } from '@/theme';
 export default function ProfileScreen() {
   const { pickups, lastSynced, driver, error, online, pendingCount } = usePickups();
   const { user, signOut } = useAuth();
+  const tabInset = useTabBarInset();
   const { name, initials } = identityOf(user);
   const done = pickups.filter((p) => p.status === 'completed').length;
   const syncedAt = lastSynced
@@ -63,7 +65,10 @@ export default function ProfileScreen() {
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: tabInset }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.identity}>
           <View style={styles.avatar} importantForAccessibility="no">
             <Text style={styles.avatarText}>{initials}</Text>
