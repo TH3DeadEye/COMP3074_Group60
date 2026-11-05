@@ -1,16 +1,18 @@
-import { router } from 'expo-router';
 import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/Icon';
 import { AppButton, Card, ProgressSegments } from '@/components/ui';
+import { identityOf, useAuth } from '@/data/auth';
 import { driver, usePickups } from '@/data/pickups';
 import { colors, fonts, tabular, type } from '@/theme';
 
 // Screen 6 · Profile
 export default function ProfileScreen() {
   const { pickups, lastSynced } = usePickups();
+  const { user, signOut } = useAuth();
+  const { name, initials } = identityOf(user);
   const done = pickups.filter((p) => p.status === 'completed').length;
   const syncedAt = `${String(lastSynced.getHours()).padStart(2, '0')}:${String(lastSynced.getMinutes()).padStart(2, '0')}`;
 
@@ -25,10 +27,10 @@ export default function ProfileScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.identity}>
           <View style={styles.avatar} importantForAccessibility="no">
-            <Text style={styles.avatarText}>{driver.initials}</Text>
+            <Text style={styles.avatarText}>{initials}</Text>
           </View>
           <View style={{ gap: 4 }}>
-            <Text style={styles.name}>{driver.name}</Text>
+            <Text style={styles.name}>{name}</Text>
             <View style={styles.roleTag}>
               <Text style={styles.roleText}>Driver</Text>
             </View>
@@ -53,7 +55,7 @@ export default function ProfileScreen() {
 
         <View style={{ flex: 1, minHeight: 24 }} />
 
-        <AppButton label="Sign out" icon="logout" variant="outline" onPress={() => router.replace('/')} />
+        <AppButton label="Sign out" icon="logout" variant="outline" onPress={() => void signOut()} />
       </ScrollView>
     </SafeAreaView>
   );

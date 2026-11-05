@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
 import { AppButton } from '@/components/ui';
+import { signInErrorMessage, useAuth } from '@/data/auth';
 import { colors, fonts } from '@/theme';
 
 // Screen 1 · Login
@@ -22,17 +23,28 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showError, setShowError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const { signIn: signInWithFirebase } = useAuth();
+  const showError = error !== null;
 
-  // Mockup only: any email with an "@" and a non-empty password signs in.
-  const signIn = () => {
+  // On success the auth state changes and the root layout swaps to the signed-in screens,
+  // so there's no manual navigation here.
+  const signIn = async () => {
+    if (loading) return;
     if (!email.includes('@') || password.length === 0) {
-      setShowError(true);
+      setError(signInErrorMessage({ code: 'auth/invalid-credential' }));
       return;
     }
-    setShowError(false);
-    router.replace('/today');
+    setError(null);
+    setLoading(true);
+    try {
+      await signInWithFirebase(email, password);
+    } catch (e) {
+      setError(signInErrorMessage(e));
+      setLoading(false);
+    }
   };
 
   return (
@@ -107,11 +119,16 @@ export default function LoginScreen() {
           {showError && (
             <View accessibilityRole="alert" style={styles.error}>
               <Icon name="alert" size={20} color="#A82A14" strokeWidth={2.2} />
-              <Text style={styles.errorText}>Wrong email or password, or this isn&apos;t a driver account.</Text>
+              <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
 
-          <AppButton label="Sign in" onPress={signIn} style={{ marginTop: 4 }} />
+          <AppButton
+            label={loading ? 'Signing in…' : 'Sign in'}
+            onPress={signIn}
+            disabled={loading}
+            style={{ marginTop: 4 }}
+          />
 
           <Text style={styles.help}>
             Forgot your password?{' '}
@@ -120,6 +137,13 @@ export default function LoginScreen() {
             </Text>
           </Text>
           {showHelp && <Text style={styles.helpDetail}>Call dispatch on (416) 555-0142, 6am – 6pm.</Text>}
+
+          <Text style={styles.help}>
+            New driver?{' '}
+            <Text style={styles.helpLink} onPress={() => router.push('/signup')} accessibilityRole="link">
+              Create an account
+            </Text>
+          </Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
