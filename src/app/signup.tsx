@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -27,6 +27,8 @@ export default function SignUpScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   const goToSignIn = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
@@ -83,6 +85,8 @@ export default function SignUpScreen() {
               autoCapitalize="words"
               autoComplete="name"
               textContentType="name"
+              returnKeyType="next"
+              onSubmitEditing={() => emailRef.current?.focus()}
               style={[styles.input, error && styles.inputError]}
             />
           </View>
@@ -92,6 +96,7 @@ export default function SignUpScreen() {
               Work email
             </Text>
             <TextInput
+              ref={emailRef}
               accessibilityLabelledBy="emailLabel"
               value={email}
               onChangeText={setEmail}
@@ -101,6 +106,8 @@ export default function SignUpScreen() {
               autoComplete="email"
               keyboardType="email-address"
               textContentType="username"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
               style={[styles.input, error && styles.inputError]}
             />
           </View>
@@ -111,7 +118,9 @@ export default function SignUpScreen() {
             </Text>
             <View>
               <TextInput
+                ref={passwordRef}
                 accessibilityLabelledBy="passwordLabel"
+                returnKeyType="go"
                 value={password}
                 onChangeText={setPassword}
                 placeholder="At least 6 characters"
@@ -143,7 +152,7 @@ export default function SignUpScreen() {
           <AppButton
             label={loading ? 'Creating account…' : 'Create account'}
             onPress={submit}
-            disabled={loading}
+            loading={loading}
             style={{ marginTop: 4 }}
           />
 

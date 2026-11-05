@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import type { JobType, Pickup, PickupStatus } from '@/data/pickups';
 import { colors, fonts } from '@/theme';
@@ -70,6 +70,7 @@ export function AppButton({
   variant = 'ink',
   icon,
   disabled,
+  loading,
   style,
 }: {
   label: string;
@@ -77,6 +78,8 @@ export function AppButton({
   variant?: ButtonVariant;
   icon?: IconName;
   disabled?: boolean;
+  /** Shows a spinner in place of the icon and ignores presses until it clears. */
+  loading?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
   const look = buttonLook[variant];
@@ -84,9 +87,9 @@ export function AppButton({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
       onPress={onPress}
-      disabled={disabled}
+      disabled={disabled || loading}
       style={({ pressed }) => [
         styles.button,
         {
@@ -99,7 +102,11 @@ export function AppButton({
         style,
       ]}
     >
-      {icon && <Icon name={icon} size={20} color={look.fg} strokeWidth={2.2} />}
+      {loading ? (
+        <ActivityIndicator color={look.fg} />
+      ) : (
+        icon && <Icon name={icon} size={20} color={look.fg} strokeWidth={2.2} />
+      )}
       <Text
         style={{
           color: look.fg,

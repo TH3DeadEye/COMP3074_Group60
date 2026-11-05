@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -27,6 +27,7 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const { signIn: signInWithFirebase } = useAuth();
+  const passwordRef = useRef<TextInput>(null);
   const showError = error !== null;
 
   // On success the auth state changes and the root layout swaps to the signed-in screens,
@@ -84,6 +85,8 @@ export default function LoginScreen() {
               autoComplete="email"
               keyboardType="email-address"
               textContentType="username"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
               style={[styles.input, showError && styles.inputError]}
             />
           </View>
@@ -94,7 +97,9 @@ export default function LoginScreen() {
             </Text>
             <View>
               <TextInput
+                ref={passwordRef}
                 accessibilityLabelledBy="passwordLabel"
+                returnKeyType="go"
                 value={password}
                 onChangeText={setPassword}
                 placeholder="Password"
@@ -126,7 +131,7 @@ export default function LoginScreen() {
           <AppButton
             label={loading ? 'Signing in…' : 'Sign in'}
             onPress={signIn}
-            disabled={loading}
+            loading={loading}
             style={{ marginTop: 4 }}
           />
 
