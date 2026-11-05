@@ -30,6 +30,18 @@ export type DriverInfo = {
   date: string;
 };
 
+// One status change a driver made. It is kept in the offline queue until the server has it.
+export type StatusUpdate = {
+  /** Becomes the audit-log event's document ID, so sending the same update twice can't log it twice. */
+  id: string;
+  pickupId: string;
+  date: string;
+  status: PickupStatus;
+  detail?: string;
+  /** When the driver made the change, on their phone (ms). */
+  clientAt: number;
+};
+
 export const statusTitle: Record<PickupStatus, string> = {
   scheduled: 'Scheduled',
   in_progress: 'In progress',

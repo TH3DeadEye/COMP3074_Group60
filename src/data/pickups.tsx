@@ -4,7 +4,15 @@ import { AppState } from 'react-native';
 
 import { identityOf, useAuth } from '@/data/auth';
 import { db } from '@/firebase';
-import { dateKey, dateLabel, type DriverInfo, type JobType, type Pickup, type PickupStatus } from './model';
+import {
+  dateKey,
+  dateLabel,
+  type DriverInfo,
+  type JobType,
+  type Pickup,
+  type PickupStatus,
+  type StatusUpdate,
+} from './model';
 import {
   commitUpdate,
   driverRef,
@@ -20,6 +28,9 @@ import {
   type PickupBase,
   type PickupEvent,
 } from './pickupsRepo';
+import { loadQueue, saveQueue } from './queueStorage';
+import { applyQueue, drainQueue, withTimeout } from './syncQueue';
+import { useOnline } from './useOnline';
 
 export type { DriverInfo, HistoryEntry, JobType, Pickup, PickupStatus } from './model';
 
@@ -29,12 +40,18 @@ export const jobLabel: Record<JobType, string> = {
   COLLECT: 'Collect bin',
 };
 
+const COMMIT_TIMEOUT_MS = 10_000; // give up on a write the server never answers
+const RETRY_EVERY_MS = 20_000; // how often to retry a queue that is stuck on a temporary failure
+
 type Store = {
   pickups: Pickup[];
   getPickup: (id: string) => Pickup | undefined;
   /** The first stop that is still open (in progress or scheduled). */
   nextPickup: Pickup | undefined;
-  /** Records a status change (and an audit-log entry) for one of today's pickups. */
+  /**
+   * Records a status change for one of today's pickups. It shows on screen immediately and is
+   * saved on the phone, then sent (with an audit-log entry) as soon as there's a connection.
+   */
   updateStatus: (id: string, status: PickupStatus, detail?: string) => void;
   driver: DriverInfo;
   /** True until the first batch of pickups has arrived. */
@@ -43,7 +60,11 @@ type Store = {
   error: string | null;
   /** Last time we heard from the server, or null if we haven't yet. */
   lastSynced: Date | null;
-  /** True while changes are on their way to the server. */
+  /** False when the phone has no connection. */
+  online: boolean;
+  /** How many status changes are saved on the phone but not yet on the server. */
+  pendingCount: number;
+  /** True while changes are being sent or the list is being refreshed. */
   syncing: boolean;
   refresh: () => Promise<void>;
 };
@@ -77,6 +98,10 @@ const patch = (prev: Remote, uid: string, changes: Partial<Remote>): Remote => (
   ...changes,
 });
 
+// The offline queue, tagged with its owner for the same reason.
+type QueueState = { uid: string | null; items: StatusUpdate[] };
+const NO_QUEUE: StatusUpdate[] = [];
+
 function describeError(e: unknown) {
   const code = typeof e === 'object' && e !== null && 'code' in e ? String(e.code) : 'unknown';
   if (__DEV__) console.warn('Firestore error:', code, e);
@@ -96,27 +121,104 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const uid = user?.uid ?? null;
   const { name, initials } = identityOf(user);
+  const online = useOnline();
 
   const [today, setToday] = useState(() => dateKey());
   const [remote, setRemote] = useState<Remote>(() => emptyRemote(null));
+  const [queueState, setQueueState] = useState<QueueState>({ uid: null, items: NO_QUEUE });
+  const [flushing, setFlushing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Latest values for callbacks that outlive a render.
-  const live = useRef({ uid, name });
+  // Latest values for callbacks that outlive a render (listeners, timers, the sender).
+  const live = useRef({ uid, name, online });
   useEffect(() => {
-    live.current = { uid, name };
+    live.current = { uid, name, online };
   });
   const seeding = useRef<string | null>(null);
+  const queueRef = useRef<StatusUpdate[]>([]); // the queue, always current (state lags a render)
+  const sending = useRef(false);
 
-  // A phone left open overnight should move on to the new day when it comes back to the front.
+  /* ---------- the offline queue ---------- */
+
+  // Load this account's saved queue when it signs in.
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') setToday(dateKey());
+    if (!uid) return;
+    let cancelled = false;
+    loadQueue(uid).then((saved) => {
+      if (cancelled) return;
+      // Keep anything queued while this was loading.
+      const merged = [...saved, ...queueRef.current];
+      queueRef.current = merged;
+      setQueueState({ uid, items: merged });
     });
-    return () => sub.remove();
+    return () => {
+      cancelled = true;
+      queueRef.current = [];
+    };
+  }, [uid]);
+
+  // Every change goes through here: update memory, update the screen, save to the phone.
+  const changeQueue = useCallback((fn: (queue: StatusUpdate[]) => StatusUpdate[]) => {
+    const owner = live.current.uid;
+    if (!owner) return;
+    const next = fn(queueRef.current);
+    queueRef.current = next;
+    setQueueState({ uid: owner, items: next });
+    void saveQueue(owner, next);
   }, []);
 
-  // Live subscriptions: any change in Firestore (from this phone or another) updates the UI.
+  // Send queued updates to the server, oldest first, for as long as we're online.
+  const send = useCallback(async () => {
+    const owner = live.current.uid;
+    if (!owner || sending.current) return;
+    sending.current = true;
+    setFlushing(true);
+    try {
+      const result = await drainQueue({
+        isOnline: () => live.current.online && live.current.uid === owner,
+        peek: () => queueRef.current[0],
+        commit: (update) => commitUpdate(db, { uid: owner, name: live.current.name }, update),
+        remove: (id) => changeQueue((q) => q.filter((u) => u.id !== id)),
+        timeoutMs: COMMIT_TIMEOUT_MS,
+        onDropped: (update, e) => {
+          if (__DEV__) console.warn('The server rejected a queued update, dropping it:', update, e);
+        },
+      });
+      if (result.sent > 0) setRemote((prev) => patch(prev, owner, { lastServerSync: new Date(), error: null }));
+    } finally {
+      sending.current = false;
+      setFlushing(false);
+    }
+  }, [changeQueue]);
+
+  const queueReady = uid !== null && queueState.uid === uid;
+  const queued = queueReady ? queueState.items : NO_QUEUE;
+
+  // Try as soon as something is queued, or the connection comes back.
+  useEffect(() => {
+    if (queueReady && online && queued.length > 0) void send();
+  }, [queueReady, online, queued.length, send]);
+
+  // And keep trying while something is stuck (e.g. a server hiccup).
+  useEffect(() => {
+    if (!(queueReady && online && queued.length > 0)) return;
+    const timer = setInterval(() => void send(), RETRY_EVERY_MS);
+    return () => clearInterval(timer);
+  }, [queueReady, online, queued.length, send]);
+
+  // Coming back to the app is a good moment to catch up, and to move on to a new day.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      setToday(dateKey());
+      void send();
+    });
+    return () => sub.remove();
+  }, [send]);
+
+  /* ---------- live data from Firestore ---------- */
+
+  // Any change in Firestore (from this phone or another) updates the UI.
   useEffect(() => {
     if (!uid) return;
 
@@ -171,28 +273,38 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
     };
   }, [uid, today]);
 
+  /* ---------- what the screens see ---------- */
+
   const view = remote.uid === uid ? remote : emptyRemote(uid);
+
+  // Queued updates the server already has (sent, but not yet removed from the queue) would show twice.
+  const waiting = useMemo(() => {
+    const onServer = new Set(view.events.map((e) => e.id));
+    return queued.filter((u) => !onServer.has(u.id));
+  }, [queued, view.events]);
 
   const pickups = useMemo<Pickup[]>(() => {
     const history = historyByPickup(view.events);
-    return [...(view.pickups ?? [])]
+    const fromServer = [...(view.pickups ?? [])]
       .sort((a, b) => a.stop - b.stop)
       .map((p) => ({ ...p, history: history.get(p.id) ?? [] }));
-  }, [view.pickups, view.events]);
+    return applyQueue(fromServer, waiting, name);
+  }, [view.pickups, view.events, waiting, name]);
 
   const refresh = useCallback(async () => {
-    if (!uid) return;
+    if (!uid || !live.current.online) return;
     setRefreshing(true);
     try {
-      // Succeeds only if the server answers, which also proves we're online.
-      await getDocsFromServer(pickupsQuery(db, uid, today));
+      await send();
+      // Succeeds only if the server answers, which also proves we're really online.
+      await withTimeout(getDocsFromServer(pickupsQuery(db, uid, today)), 8_000);
       setRemote((prev) => patch(prev, uid, { lastServerSync: new Date() }));
     } catch {
-      // Offline: keep showing what we have.
+      // Couldn't reach the server: keep showing what we have.
     } finally {
       setRefreshing(false);
     }
-  }, [uid, today]);
+  }, [uid, today, send]);
 
   const driverDoc = view.driverDoc;
   const driver = useMemo<DriverInfo>(
@@ -214,21 +326,33 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
       pickups,
       getPickup: (id) => pickups.find((p) => p.id === id),
       nextPickup: pickups.find((p) => p.status === 'in_progress' || p.status === 'scheduled'),
-      updateStatus: (id, status, detail) => {
-        const owner = live.current.uid;
-        if (!owner) return;
-        commitUpdate(db, { uid: owner, name: live.current.name }, { id: newId(), pickupId: id, date: today, status, detail, clientAt: Date.now() }).catch(
-          (e) => setRemote((prev) => patch(prev, owner, { error: describeError(e) })),
-        );
-      },
+      updateStatus: (id, status, detail) =>
+        changeQueue((q) => [...q, { id: newId(), pickupId: id, date: today, status, detail, clientAt: Date.now() }]),
       driver,
       loading: uid !== null && view.pickups === null && view.error === null,
       error: view.error,
       lastSynced: view.lastServerSync,
-      syncing: view.pendingWrites || refreshing,
+      online,
+      pendingCount: waiting.length,
+      syncing: flushing || refreshing || view.pendingWrites,
       refresh,
     }),
-    [pickups, driver, uid, today, view.pickups, view.error, view.lastServerSync, view.pendingWrites, refreshing, refresh],
+    [
+      pickups,
+      driver,
+      uid,
+      today,
+      changeQueue,
+      view.pickups,
+      view.error,
+      view.lastServerSync,
+      view.pendingWrites,
+      online,
+      waiting.length,
+      flushing,
+      refreshing,
+      refresh,
+    ],
   );
 
   return <PickupsContext.Provider value={store}>{children}</PickupsContext.Provider>;

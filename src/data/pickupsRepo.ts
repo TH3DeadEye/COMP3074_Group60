@@ -11,7 +11,15 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 
-import { historyTitle, timeLabel, type HistoryEntry, type JobType, type Pickup, type PickupStatus } from './model';
+import {
+  historyTitle,
+  timeLabel,
+  type HistoryEntry,
+  type JobType,
+  type Pickup,
+  type PickupStatus,
+  type StatusUpdate,
+} from './model';
 import { DEMO_DRIVER, SEED_PICKUPS } from './seed';
 
 // Everything that talks to Firestore lives here. It takes the database as an argument and has no
@@ -33,16 +41,6 @@ export type PickupEvent = {
   detail: string | null;
   byName: string;
   /** When it happened on the driver's phone (ms). The server time is stored separately in `at`. */
-  clientAt: number;
-};
-
-export type StatusUpdate = {
-  /** Becomes the event's document ID, so sending the same update twice can't log it twice. */
-  id: string;
-  pickupId: string;
-  date: string;
-  status: PickupStatus;
-  detail?: string;
   clientAt: number;
 };
 
