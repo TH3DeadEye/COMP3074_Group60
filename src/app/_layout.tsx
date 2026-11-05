@@ -13,7 +13,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { WelcomeOverlay } from '@/components/WelcomeOverlay';
+import { SessionOverlay } from '@/components/SessionOverlay';
 import { AuthProvider, useAuth } from '@/data/auth';
 import { PickupsProvider } from '@/data/pickups';
 import { colors } from '@/theme';
@@ -29,7 +29,7 @@ export default function RootLayout() {
 }
 
 function RootNavigator() {
-  const { user, initializing, welcome, dismissWelcome } = useAuth();
+  const { user, initializing, welcome, dismissWelcome, farewell, dismissFarewell } = useAuth();
   const [fontsLoaded] = useFonts({
     Barlow_400Regular,
     Barlow_500Medium,
@@ -44,7 +44,7 @@ function RootNavigator() {
 
   return (
     <PickupsProvider>
-      <StatusBar style={welcome ? 'light' : 'dark'} />
+      <StatusBar style={welcome || farewell ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.ground } }}>
         {/* Signed out: only the login screen. Signing in/out swaps the groups and the router redirects. */}
         <Stack.Protected guard={!user}>
@@ -64,8 +64,12 @@ function RootNavigator() {
           />
         </Stack.Protected>
       </Stack>
-      {/* Drawn over the app, in the same render that signs the user in, so the Today screen never flashes first. */}
-      {welcome && <WelcomeOverlay firstName={welcome.firstName} isNew={welcome.isNew} onDone={dismissWelcome} />}
+      {/* Drawn over the app, in the same render that signs the user in or out, so no screen flashes first. */}
+      {welcome ? (
+        <SessionOverlay key="welcome" variant="welcome" firstName={welcome.firstName} isNew={welcome.isNew} onDone={dismissWelcome} />
+      ) : farewell ? (
+        <SessionOverlay key="goodbye" variant="goodbye" firstName={farewell.firstName} onDone={dismissFarewell} />
+      ) : null}
     </PickupsProvider>
   );
 }
