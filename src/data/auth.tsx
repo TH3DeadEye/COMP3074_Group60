@@ -6,7 +6,7 @@ import {
   updateProfile,
   type User,
 } from 'firebase/auth';
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { auth } from '@/firebase';
 
@@ -16,10 +16,15 @@ export type AuthUser = { uid: string; email: string | null; displayName: string 
 
 const toAuthUser = (u: User): AuthUser => ({ uid: u.uid, email: u.email, displayName: u.displayName });
 
+// Shown once, right after the driver signs in or creates an account (not on every app launch).
+export type Welcome = { firstName: string; isNew: boolean };
+
 type AuthState = {
   user: AuthUser | null;
   // True until Firebase has told us whether a saved session exists.
   initializing: boolean;
+  welcome: Welcome | null;
+  dismissWelcome: () => void;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -30,12 +35,22 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [initializing, setInitializing] = useState(true);
+  const [welcome, setWelcome] = useState<Welcome | null>(null);
+  // Set just before a sign-in/sign-up so the auth listener knows the next user is a fresh login
+  // rather than a session restored at launch.
+  const pendingWelcome = useRef<{ isNew: boolean; name?: string } | null>(null);
 
   useEffect(() => {
     // Fires once on launch with the restored session (or null), then on every sign in/out.
     return onAuthStateChanged(auth, (next) => {
       setUser(next ? toAuthUser(next) : null);
       setInitializing(false);
+      const pending = pendingWelcome.current;
+      if (next && pending) {
+        pendingWelcome.current = null;
+        // Same update as setUser, so the welcome is on screen the moment the app unlocks.
+        setWelcome({ firstName: firstNameOf(pending.name ?? identityOf(toAuthUser(next)).name), isNew: pending.isNew });
+      }
     });
   }, []);
 
@@ -43,11 +58,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       initializing,
+      welcome,
+      dismissWelcome: () => setWelcome(null),
       signIn: async (email, password) => {
-        await signInWithEmailAndPassword(auth, email.trim(), password);
+        pendingWelcome.current = { isNew: false };
+        try {
+          await signInWithEmailAndPassword(auth, email.trim(), password);
+        } catch (e) {
+          pendingWelcome.current = null;
+          throw e;
+        }
       },
       signUp: async (name, email, password) => {
-        const { user: created } = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        pendingWelcome.current = { isNew: true, name: name.trim() };
+        let created: User;
+        try {
+          ({ user: created } = await createUserWithEmailAndPassword(auth, email.trim(), password));
+        } catch (e) {
+          pendingWelcome.current = null;
+          throw e;
+        }
         // The account exists and the user is signed in at this point. Saving the name is a
         // nicety: if it fails, the profile just falls back to the email.
         try {
@@ -55,9 +85,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(toAuthUser(created));
         } catch {}
       },
-      signOut: () => firebaseSignOut(auth),
+      signOut: async () => {
+        setWelcome(null);
+        await firebaseSignOut(auth);
+      },
     }),
-    [user, initializing],
+    [user, initializing, welcome],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -120,6 +153,12 @@ export function signUpErrorMessage(error: unknown): string {
       if (__DEV__) console.warn('Sign-up failed:', code || error);
       return "Couldn't create the account. Try again.";
   }
+}
+
+// "Jordan Rivera" -> "Jordan", "test.driver" -> "Test".
+function firstNameOf(name: string) {
+  const first = name.split(/[\s._-]+/).find(Boolean) ?? name;
+  return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
 // Name and initials for the profile screen.
