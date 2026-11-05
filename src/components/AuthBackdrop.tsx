@@ -23,7 +23,8 @@ const BLOBS: Blob[] = [
   { size: 200, color: colors.doneMarker, bottom: 40, right: -70, drift: 20, duration: 10000 },
 ];
 
-export function AuthBackdrop() {
+/** `strength` is how bold the shapes are (0–1). Lower it where text sits on top of them. */
+export function AuthBackdrop({ strength = 0.92 }: { strength?: number }) {
   const [values] = useState(() => BLOBS.map(() => new Animated.Value(0)));
 
   useEffect(() => {
@@ -68,7 +69,7 @@ export function AuthBackdrop() {
                 height: size,
                 borderRadius: size / 2,
                 backgroundColor: color,
-                opacity: 0.92,
+                opacity: strength,
                 transform: [
                   { translateX: values[i].interpolate({ inputRange: [0, 1], outputRange: [-drift, drift] }) },
                   { translateY: values[i].interpolate({ inputRange: [0, 1], outputRange: [drift, -drift] }) },

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Glass } from '@/components/Glass';
 import { Icon, type IconName } from '@/components/Icon';
 import { useTabBarInset } from '@/components/TabBar';
 import { AppButton, Card, JobTag, ProgressSegments, StatusChip } from '@/components/ui';
@@ -48,13 +49,16 @@ export default function TodayScreen() {
           </Text>
         </View>
         <View style={styles.headerActions}>
-          <View
+          <Glass
             accessibilityLabel={`Sync status: ${sync.label}`}
-            style={[styles.syncChip, { backgroundColor: sync.bg }]}
+            style={styles.syncChip}
+            scheme="light"
+            tint={sync.bg}
+            fallbackColor={sync.bg}
           >
             <Icon name={sync.icon} size={16} color={sync.fg} strokeWidth={2.2} />
             <Text style={[styles.syncText, { color: sync.fg }]}>{sync.label}</Text>
-          </View>
+          </Glass>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Refresh pickups"
@@ -242,7 +246,6 @@ const styles = StyleSheet.create({
     height: 32,
     paddingHorizontal: 12,
     borderRadius: 16,
-    backgroundColor: colors.successBg,
   },
   syncText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.success },
   errorBanner: {

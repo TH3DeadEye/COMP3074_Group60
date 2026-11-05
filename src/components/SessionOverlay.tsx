@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet } from 'react-native';
 
+import { AuthBackdrop } from '@/components/AuthBackdrop';
+import { Glass } from '@/components/Glass';
 import { Icon, type IconName } from '@/components/Icon';
 import { colors, fonts } from '@/theme';
 
@@ -132,7 +134,9 @@ export function SessionOverlay({
     value.interpolate({ inputRange: [0, 1], outputRange: [distance, 0] });
 
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, { opacity: root }]}>
+    <Animated.View style={[StyleSheet.absoluteFill, styles.root, { opacity: root }]}>
+      {/* The same drifting shapes as the sign-in screens, dimmed so the big text stays easy to read. */}
+      <AuthBackdrop strength={0.6} />
       <Pressable
         onPress={leave}
         accessibilityRole="button"
@@ -141,14 +145,22 @@ export function SessionOverlay({
       >
         <Animated.View
           style={[
-            styles.logo,
+            styles.logoWrap,
             {
               opacity: logo.interpolate({ inputRange: [0, 0.4], outputRange: [0, 1], extrapolate: 'clamp' }),
               transform: [{ scale: logo.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }],
             },
           ]}
         >
-          <Icon name={icon} size={44} color={colors.ink} strokeWidth={icon === 'check' ? 3 : undefined} />
+          <Glass
+            style={styles.logo}
+            scheme="dark"
+            interactive={false}
+            tint="rgba(255, 198, 41, 0.75)"
+            fallbackColor={colors.hiVis}
+          >
+            <Icon name={icon} size={44} color={colors.ink} strokeWidth={icon === 'check' ? 3 : undefined} />
+          </Glass>
         </Animated.View>
 
         <Animated.Text style={[styles.label, { opacity: label, transform: [{ translateY: rise(label, 14) }] }]}>
@@ -170,22 +182,21 @@ export function SessionOverlay({
 }
 
 const styles = StyleSheet.create({
+  root: { backgroundColor: colors.ink },
   screen: {
     flex: 1,
-    backgroundColor: colors.ink,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
     gap: 6,
   },
+  logoWrap: { marginBottom: 28 },
   logo: {
     width: 96,
     height: 96,
     borderRadius: 26,
-    backgroundColor: colors.hiVis,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 28,
   },
   label: {
     fontFamily: fonts.bold,
