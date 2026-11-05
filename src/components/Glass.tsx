@@ -2,8 +2,11 @@ import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { useEffect, useState } from 'react';
 import { AccessibilityInfo, View, type ColorValue, type ViewProps } from 'react-native';
 
-// Real liquid glass needs iOS 26 or later. Everywhere else (Android, older iOS) this is false and
-// we draw a plain translucent panel with the same shape instead.
+import { ANDROID_GLASS_AVAILABLE, AndroidGlass } from './AndroidGlass';
+
+// iOS gets Apple's real liquid glass (iOS 26 or later). Android 13+ in a development build gets
+// a shader-based version. Everywhere else (Expo Go, older OS versions) we draw a plain
+// translucent panel with the same shape instead.
 const GLASS_SUPPORTED = isLiquidGlassAvailable();
 
 // Reduce Transparency is an iOS accessibility setting; people who turn it on should get a solid panel.
@@ -62,6 +65,14 @@ export function Glass({
       >
         {children}
       </GlassView>
+    );
+  }
+
+  if (ANDROID_GLASS_AVAILABLE && !reduceTransparency) {
+    return (
+      <AndroidGlass {...rest} style={style} effect={effect} scheme={scheme} tint={tint}>
+        {children}
+      </AndroidGlass>
     );
   }
 
