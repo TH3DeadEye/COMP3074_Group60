@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
 
 import { AuthBackdrop } from '@/components/AuthBackdrop';
 import { Glass } from '@/components/Glass';
@@ -152,15 +152,11 @@ export function SessionOverlay({
             },
           ]}
         >
-          <Glass
-            style={styles.logo}
-            scheme="dark"
-            interactive={false}
-            tint="rgba(255, 198, 41, 0.75)"
-            fallbackColor={colors.hiVis}
-          >
+          {/* A solid yellow tile, so the icon always stands out; a clear glass layer on top adds the sheen. */}
+          <View style={styles.logo}>
+            <Glass style={styles.logoGlass} effect="clear" scheme="light" fallbackColor="transparent" pointerEvents="none" />
             <Icon name={icon} size={44} color={colors.ink} strokeWidth={icon === 'check' ? 3 : undefined} />
-          </Glass>
+          </View>
         </Animated.View>
 
         <Animated.Text style={[styles.label, { opacity: label, transform: [{ translateY: rise(label, 14) }] }]}>
@@ -195,9 +191,12 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 26,
+    backgroundColor: colors.hiVis,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
+  logoGlass: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 26 },
   label: {
     fontFamily: fonts.bold,
     fontSize: 16,
