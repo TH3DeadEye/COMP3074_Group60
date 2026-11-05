@@ -1,0 +1,61 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validStatus(s) {
+      return s in ['scheduled', 'in_progress', 'completed', 'missed', 'cancelled'];
+    }
+
+    // A driver's profile (truck, shift). Readable by its owner; written once, then frozen.
+    // Creating it is allowed because there is no dispatch back end yet: the app files the
+    // demo profile on a driver's first sign-in. A real deployment would write it with the
+    // Admin SDK and drop the `create` rule.
+    match /drivers/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow update, delete: if false;
+    }
+
+    match /pickups/{pickupId} {
+      // Drivers see only their own pickups.
+      allow read: if signedIn() && resource.data.driverUid == request.auth.uid;
+
+      // Same demo-only allowance as above: a driver may file pickups under their own account
+      // (the first-sign-in demo data). They can't create them for anyone else.
+      allow create: if signedIn()
+                    && request.resource.data.driverUid == request.auth.uid
+                    && validStatus(request.resource.data.status);
+
+      // The only thing a driver can change on a pickup is its status, and it must be stamped
+      // with the server time.
+      allow update: if signedIn()
+                    && resource.data.driverUid == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+                    && validStatus(request.resource.data.status)
+                    && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // The audit log. Rows can be added but never edited or removed.
+    match /pickupEvents/{eventId} {
+      allow read: if signedIn() && resource.data.driverUid == request.auth.uid;
+
+      allow create: if signedIn()
+                    && request.resource.data.driverUid == request.auth.uid
+                    && request.resource.data.byUid == request.auth.uid
+                    && validStatus(request.resource.data.status)
+                    && request.resource.data.at == request.time
+                    // The event must be about one of this driver's own pickups. getAfter() sees
+                    // pickups created in the same batch, so the first-sign-in seed works.
+                    && getAfter(/databases/$(database)/documents/pickups/$(request.resource.data.pickupId)).data.driverUid == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+  }
+}

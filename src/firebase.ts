@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { getAuth, getReactNativePersistence, initializeAuth, type Auth } from 'firebase/auth';
+import { getFirestore, initializeFirestore, type Firestore } from 'firebase/firestore';
 import { Platform } from 'react-native';
 
 import googleServices from '../google-services.json';
@@ -33,3 +34,16 @@ function createAuth(): Auth {
 }
 
 export const auth = createAuth();
+
+function createDb(): Firestore {
+  try {
+    // Auto-detect lets the SDK fall back to long polling on networks where React Native's
+    // streaming connection to Firestore is blocked.
+    return initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+  } catch {
+    // Fast Refresh re-runs this module, and initializeFirestore throws if it already exists.
+    return getFirestore(app);
+  }
+}
+
+export const db = createDb();
