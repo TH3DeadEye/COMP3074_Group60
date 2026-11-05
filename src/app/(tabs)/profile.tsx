@@ -5,16 +5,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '@/components/Icon';
 import { AppButton, Card, ProgressSegments } from '@/components/ui';
 import { identityOf, useAuth } from '@/data/auth';
-import { driver, usePickups } from '@/data/pickups';
+import { usePickups } from '@/data/pickups';
 import { colors, fonts, tabular, type } from '@/theme';
 
 // Screen 6 · Profile
 export default function ProfileScreen() {
-  const { pickups, lastSynced } = usePickups();
+  const { pickups, lastSynced, driver, error } = usePickups();
   const { user, signOut } = useAuth();
   const { name, initials } = identityOf(user);
   const done = pickups.filter((p) => p.status === 'completed').length;
-  const syncedAt = `${String(lastSynced.getHours()).padStart(2, '0')}:${String(lastSynced.getMinutes()).padStart(2, '0')}`;
+  const syncedAt = lastSynced
+    ? `${String(lastSynced.getHours()).padStart(2, '0')}:${String(lastSynced.getMinutes()).padStart(2, '0')}`
+    : null;
 
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
@@ -45,11 +47,18 @@ export default function ProfileScreen() {
           </InfoRow>
         </Card>
 
-        <View style={styles.synced}>
-          <Icon name="cloudCheck" size={22} color="#17663A" />
+        <View style={[styles.synced, error && { backgroundColor: colors.dangerBg }]}>
+          <Icon name={error ? 'alert' : 'cloudCheck'} size={22} color={error ? colors.danger : '#17663A'} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.syncedTitle}>All changes synced</Text>
-            <Text style={styles.syncedBody}>Status updates reach dispatch right away · last at {syncedAt}</Text>
+            <Text style={[styles.syncedTitle, error && { color: colors.danger }]}>
+              {error ? "Can't sync" : syncedAt ? 'All changes synced' : 'Connecting…'}
+            </Text>
+            <Text style={[styles.syncedBody, error && { color: colors.danger }]}>
+              {error ??
+                (syncedAt
+                  ? `Status updates reach dispatch right away · last at ${syncedAt}`
+                  : 'Waiting to hear from the server')}
+            </Text>
           </View>
         </View>
 

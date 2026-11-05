@@ -1,34 +1,27 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { getDocsFromServer, onSnapshot } from 'firebase/firestore';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AppState } from 'react-native';
 
-export type PickupStatus = 'scheduled' | 'in_progress' | 'completed' | 'missed' | 'cancelled';
-export type JobType = 'SWAP' | 'DROP' | 'COLLECT';
+import { identityOf, useAuth } from '@/data/auth';
+import { db } from '@/firebase';
+import { dateKey, dateLabel, type DriverInfo, type JobType, type Pickup, type PickupStatus } from './model';
+import {
+  commitUpdate,
+  driverRef,
+  ensureDriver,
+  eventsQuery,
+  historyByPickup,
+  newId,
+  parseEvent,
+  parsePickup,
+  pickupsQuery,
+  seedToday,
+  type DriverDoc,
+  type PickupBase,
+  type PickupEvent,
+} from './pickupsRepo';
 
-export type HistoryEntry = { title: string; meta: string };
-
-export type Pickup = {
-  id: string;
-  stop: number;
-  customer: string;
-  address: string;
-  city: string;
-  window: string;
-  job: JobType;
-  material: string;
-  note?: string;
-  status: PickupStatus;
-  history: HistoryEntry[];
-  // Marker position on the mock route map, in the map's 390×764 design space.
-  map: { x: number; y: number };
-};
-
-export const driver = {
-  name: 'Jordan Rivera',
-  initials: 'JR',
-  truck: 'T-07',
-  truckType: 'Roll-off',
-  date: 'Mon, Nov 16',
-  shift: '07:00 – 15:30',
-};
+export type { DriverInfo, HistoryEntry, JobType, Pickup, PickupStatus } from './model';
 
 export const jobLabel: Record<JobType, string> = {
   SWAP: 'Swap bin',
@@ -36,74 +29,185 @@ export const jobLabel: Record<JobType, string> = {
   COLLECT: 'Collect bin',
 };
 
-const assigned: HistoryEntry[] = [
-  { title: 'Assigned to T-07', meta: '07:05 · Dispatcher A. Lee' },
-  { title: 'Scheduled', meta: '07:02 · Dispatcher A. Lee' },
-];
-
-// Mock data for the prototype. Stops 1–2 aren't detailed in the design, so their
-// addresses and windows are placeholders.
-const initialPickups: Pickup[] = [
-  {
-    id: 'P-1040', stop: 1, customer: 'Maple Dental Clinic', address: '120 Bloor St W', city: 'Toronto',
-    window: '08:00 – 09:00', job: 'COLLECT', material: 'General waste', status: 'completed',
-    history: [{ title: 'Completed', meta: '08:41 · Jordan Rivera' }, ...assigned], map: { x: 40, y: 170 },
-  },
-  {
-    id: 'P-1041', stop: 2, customer: 'R. Singh', address: '48 Euclid Ave', city: 'Toronto',
-    window: '09:30 – 10:30', job: 'DROP', material: 'Renovation debris', status: 'completed',
-    history: [{ title: 'Completed', meta: '09:58 · Jordan Rivera' }, ...assigned], map: { x: 120, y: 280 },
-  },
-  {
-    id: 'P-1042', stop: 3, customer: 'Northside Builders', address: '900 Dufferin St', city: 'Toronto',
-    window: '11:00 – 12:00', job: 'SWAP', material: 'Construction debris', note: 'Bin behind gate B',
-    status: 'scheduled', history: assigned, map: { x: 264, y: 330 },
-  },
-  {
-    id: 'P-1043', stop: 4, customer: 'Lakeview Condos', address: '9 Queens Quay W', city: 'Toronto',
-    window: '12:30 – 13:30', job: 'SWAP', material: 'Mixed recycling', status: 'scheduled',
-    history: assigned, map: { x: 345, y: 190 },
-  },
-  {
-    id: 'P-1044', stop: 5, customer: 'Harbour Kitchens', address: '55 Mill St', city: 'Toronto',
-    window: '13:30 – 14:30', job: 'COLLECT', material: 'Organics', note: 'Loading dock opens at 13:30',
-    status: 'scheduled', history: assigned, map: { x: 260, y: 110 },
-  },
-  {
-    id: 'P-1045', stop: 6, customer: 'Parkdale Rec Centre', address: '75 Lansdowne Ave', city: 'Toronto',
-    window: '14:30 – 15:15', job: 'DROP', material: 'Yard waste', status: 'scheduled',
-    history: assigned, map: { x: 40, y: 420 },
-  },
-];
-
-const statusTitle: Record<PickupStatus, string> = {
-  scheduled: 'Scheduled',
-  in_progress: 'In progress',
-  completed: 'Completed',
-  missed: 'Missed',
-  cancelled: 'Cancelled',
-};
-
 type Store = {
   pickups: Pickup[];
   getPickup: (id: string) => Pickup | undefined;
   /** The first stop that is still open (in progress or scheduled). */
   nextPickup: Pickup | undefined;
+  /** Records a status change (and an audit-log entry) for one of today's pickups. */
   updateStatus: (id: string, status: PickupStatus, detail?: string) => void;
-  lastSynced: Date;
-  refresh: () => void;
+  driver: DriverInfo;
+  /** True until the first batch of pickups has arrived. */
+  loading: boolean;
+  /** Set when Firestore refuses or can't be reached, e.g. the rules aren't deployed. */
+  error: string | null;
+  /** Last time we heard from the server, or null if we haven't yet. */
+  lastSynced: Date | null;
+  /** True while changes are on their way to the server. */
+  syncing: boolean;
+  refresh: () => Promise<void>;
 };
 
 const PickupsContext = createContext<Store | null>(null);
 
-function nowLabel() {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+// Everything we've heard from Firestore, tagged with the user it belongs to so that switching
+// accounts can never show the previous driver's data.
+type Remote = {
+  uid: string | null;
+  pickups: PickupBase[] | null; // null until the first snapshot
+  events: PickupEvent[];
+  driverDoc: DriverDoc | null | undefined; // undefined = not loaded, null = no document
+  lastServerSync: Date | null;
+  pendingWrites: boolean;
+  error: string | null;
+};
+
+const emptyRemote = (uid: string | null): Remote => ({
+  uid,
+  pickups: null,
+  events: [],
+  driverDoc: undefined,
+  lastServerSync: null,
+  pendingWrites: false,
+  error: null,
+});
+
+const patch = (prev: Remote, uid: string, changes: Partial<Remote>): Remote => ({
+  ...(prev.uid === uid ? prev : emptyRemote(uid)),
+  ...changes,
+});
+
+function describeError(e: unknown) {
+  const code = typeof e === 'object' && e !== null && 'code' in e ? String(e.code) : 'unknown';
+  if (__DEV__) console.warn('Firestore error:', code, e);
+  switch (code) {
+    case 'permission-denied':
+      return "Firestore refused the request (permission denied). Publish firestore.rules to the project's database.";
+    case 'not-found':
+      return 'Firestore database not found. Create the (default) database in the Firebase console.';
+    case 'unavailable':
+      return "Can't reach the server. Showing the last data this phone saw.";
+    default:
+      return `Couldn't load your pickups (${code}).`;
+  }
 }
 
 export function PickupsProvider({ children }: { children: ReactNode }) {
-  const [pickups, setPickups] = useState(initialPickups);
-  const [lastSynced, setLastSynced] = useState(() => new Date());
+  const { user } = useAuth();
+  const uid = user?.uid ?? null;
+  const { name, initials } = identityOf(user);
+
+  const [today, setToday] = useState(() => dateKey());
+  const [remote, setRemote] = useState<Remote>(() => emptyRemote(null));
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Latest values for callbacks that outlive a render.
+  const live = useRef({ uid, name });
+  useEffect(() => {
+    live.current = { uid, name };
+  });
+  const seeding = useRef<string | null>(null);
+
+  // A phone left open overnight should move on to the new day when it comes back to the front.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setToday(dateKey());
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Live subscriptions: any change in Firestore (from this phone or another) updates the UI.
+  useEffect(() => {
+    if (!uid) return;
+
+    const fail = (e: unknown) => setRemote((prev) => patch(prev, uid, { error: describeError(e) }));
+
+    // First time on this account/day: file the demo pickups, once.
+    const seed = async () => {
+      const key = `${uid}_${today}`;
+      if (seeding.current === key) return;
+      seeding.current = key;
+      try {
+        await ensureDriver(db, uid);
+        await seedToday(db, { uid, name: live.current.name }, today);
+      } catch (e) {
+        seeding.current = null;
+        fail(e);
+      }
+    };
+
+    const unsubPickups = onSnapshot(
+      pickupsQuery(db, uid, today),
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        setRemote((prev) =>
+          patch(prev, uid, {
+            pickups: snap.docs.map((d) => parsePickup(d.id, d.data())),
+            pendingWrites: snap.metadata.hasPendingWrites,
+            error: null,
+            ...(fromServer ? { lastServerSync: new Date() } : {}),
+          }),
+        );
+        // An empty answer from the cache just means we haven't heard from the server yet.
+        if (snap.empty && fromServer) void seed();
+      },
+      fail,
+    );
+    const unsubEvents = onSnapshot(
+      eventsQuery(db, uid, today),
+      (snap) => setRemote((prev) => patch(prev, uid, { events: snap.docs.map((d) => parseEvent(d.id, d.data())) })),
+      fail,
+    );
+    const unsubDriver = onSnapshot(
+      driverRef(db, uid),
+      (snap) => setRemote((prev) => patch(prev, uid, { driverDoc: snap.exists() ? (snap.data() as DriverDoc) : null })),
+      fail,
+    );
+
+    return () => {
+      unsubPickups();
+      unsubEvents();
+      unsubDriver();
+    };
+  }, [uid, today]);
+
+  const view = remote.uid === uid ? remote : emptyRemote(uid);
+
+  const pickups = useMemo<Pickup[]>(() => {
+    const history = historyByPickup(view.events);
+    return [...(view.pickups ?? [])]
+      .sort((a, b) => a.stop - b.stop)
+      .map((p) => ({ ...p, history: history.get(p.id) ?? [] }));
+  }, [view.pickups, view.events]);
+
+  const refresh = useCallback(async () => {
+    if (!uid) return;
+    setRefreshing(true);
+    try {
+      // Succeeds only if the server answers, which also proves we're online.
+      await getDocsFromServer(pickupsQuery(db, uid, today));
+      setRemote((prev) => patch(prev, uid, { lastServerSync: new Date() }));
+    } catch {
+      // Offline: keep showing what we have.
+    } finally {
+      setRefreshing(false);
+    }
+  }, [uid, today]);
+
+  const driverDoc = view.driverDoc;
+  const driver = useMemo<DriverInfo>(
+    () => ({
+      name,
+      initials,
+      truck: driverDoc?.truck ?? '—',
+      truckType: driverDoc?.truckType ?? '',
+      shift: driverDoc?.shift ?? '—',
+      date: dateLabel(),
+    }),
+    // `today` changes at midnight, which moves the date label with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [name, initials, driverDoc, today],
+  );
 
   const store = useMemo<Store>(
     () => ({
@@ -111,29 +215,20 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
       getPickup: (id) => pickups.find((p) => p.id === id),
       nextPickup: pickups.find((p) => p.status === 'in_progress' || p.status === 'scheduled'),
       updateStatus: (id, status, detail) => {
-        setPickups((list) =>
-          list.map((p) =>
-            p.id === id
-              ? {
-                  ...p,
-                  status,
-                  history: [
-                    {
-                      title: detail ? `${statusTitle[status]} · ${detail}` : statusTitle[status],
-                      meta: `${nowLabel()} · ${driver.name}`,
-                    },
-                    ...p.history,
-                  ],
-                }
-              : p,
-          ),
+        const owner = live.current.uid;
+        if (!owner) return;
+        commitUpdate(db, { uid: owner, name: live.current.name }, { id: newId(), pickupId: id, date: today, status, detail, clientAt: Date.now() }).catch(
+          (e) => setRemote((prev) => patch(prev, owner, { error: describeError(e) })),
         );
-        setLastSynced(new Date());
       },
-      lastSynced,
-      refresh: () => setLastSynced(new Date()),
+      driver,
+      loading: uid !== null && view.pickups === null && view.error === null,
+      error: view.error,
+      lastSynced: view.lastServerSync,
+      syncing: view.pendingWrites || refreshing,
+      refresh,
     }),
-    [pickups, lastSynced],
+    [pickups, driver, uid, today, view.pickups, view.error, view.lastServerSync, view.pendingWrites, refreshing, refresh],
   );
 
   return <PickupsContext.Provider value={store}>{children}</PickupsContext.Provider>;
