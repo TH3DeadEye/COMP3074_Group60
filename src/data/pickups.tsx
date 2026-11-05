@@ -1,34 +1,38 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { getDocsFromServer, onSnapshot } from 'firebase/firestore';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AppState } from 'react-native';
 
-export type PickupStatus = 'scheduled' | 'in_progress' | 'completed' | 'missed' | 'cancelled';
-export type JobType = 'SWAP' | 'DROP' | 'COLLECT';
+import { identityOf, useAuth } from '@/data/auth';
+import { db } from '@/firebase';
+import {
+  dateKey,
+  dateLabel,
+  type DriverInfo,
+  type JobType,
+  type Pickup,
+  type PickupStatus,
+  type StatusUpdate,
+} from './model';
+import {
+  commitUpdate,
+  driverRef,
+  ensureDriver,
+  eventsQuery,
+  historyByPickup,
+  newId,
+  parseEvent,
+  parsePickup,
+  pickupsQuery,
+  seedToday,
+  type DriverDoc,
+  type PickupBase,
+  type PickupEvent,
+} from './pickupsRepo';
+import { loadQueue, saveQueue } from './queueStorage';
+import { applyQueue, drainQueue, withTimeout } from './syncQueue';
+import { useOnline } from './useOnline';
 
-export type HistoryEntry = { title: string; meta: string };
-
-export type Pickup = {
-  id: string;
-  stop: number;
-  customer: string;
-  address: string;
-  city: string;
-  window: string;
-  job: JobType;
-  material: string;
-  note?: string;
-  status: PickupStatus;
-  history: HistoryEntry[];
-  // Marker position on the mock route map, in the map's 390×764 design space.
-  map: { x: number; y: number };
-};
-
-export const driver = {
-  name: 'Jordan Rivera',
-  initials: 'JR',
-  truck: 'T-07',
-  truckType: 'Roll-off',
-  date: 'Mon, Nov 16',
-  shift: '07:00 – 15:30',
-};
+export type { DriverInfo, HistoryEntry, JobType, Pickup, PickupStatus } from './model';
 
 export const jobLabel: Record<JobType, string> = {
   SWAP: 'Swap bin',
@@ -36,104 +40,319 @@ export const jobLabel: Record<JobType, string> = {
   COLLECT: 'Collect bin',
 };
 
-const assigned: HistoryEntry[] = [
-  { title: 'Assigned to T-07', meta: '07:05 · Dispatcher A. Lee' },
-  { title: 'Scheduled', meta: '07:02 · Dispatcher A. Lee' },
-];
-
-// Mock data for the prototype. Stops 1–2 aren't detailed in the design, so their
-// addresses and windows are placeholders.
-const initialPickups: Pickup[] = [
-  {
-    id: 'P-1040', stop: 1, customer: 'Maple Dental Clinic', address: '120 Bloor St W', city: 'Toronto',
-    window: '08:00 – 09:00', job: 'COLLECT', material: 'General waste', status: 'completed',
-    history: [{ title: 'Completed', meta: '08:41 · Jordan Rivera' }, ...assigned], map: { x: 40, y: 170 },
-  },
-  {
-    id: 'P-1041', stop: 2, customer: 'R. Singh', address: '48 Euclid Ave', city: 'Toronto',
-    window: '09:30 – 10:30', job: 'DROP', material: 'Renovation debris', status: 'completed',
-    history: [{ title: 'Completed', meta: '09:58 · Jordan Rivera' }, ...assigned], map: { x: 120, y: 280 },
-  },
-  {
-    id: 'P-1042', stop: 3, customer: 'Northside Builders', address: '900 Dufferin St', city: 'Toronto',
-    window: '11:00 – 12:00', job: 'SWAP', material: 'Construction debris', note: 'Bin behind gate B',
-    status: 'scheduled', history: assigned, map: { x: 264, y: 330 },
-  },
-  {
-    id: 'P-1043', stop: 4, customer: 'Lakeview Condos', address: '9 Queens Quay W', city: 'Toronto',
-    window: '12:30 – 13:30', job: 'SWAP', material: 'Mixed recycling', status: 'scheduled',
-    history: assigned, map: { x: 345, y: 190 },
-  },
-  {
-    id: 'P-1044', stop: 5, customer: 'Harbour Kitchens', address: '55 Mill St', city: 'Toronto',
-    window: '13:30 – 14:30', job: 'COLLECT', material: 'Organics', note: 'Loading dock opens at 13:30',
-    status: 'scheduled', history: assigned, map: { x: 260, y: 110 },
-  },
-  {
-    id: 'P-1045', stop: 6, customer: 'Parkdale Rec Centre', address: '75 Lansdowne Ave', city: 'Toronto',
-    window: '14:30 – 15:15', job: 'DROP', material: 'Yard waste', status: 'scheduled',
-    history: assigned, map: { x: 40, y: 420 },
-  },
-];
-
-const statusTitle: Record<PickupStatus, string> = {
-  scheduled: 'Scheduled',
-  in_progress: 'In progress',
-  completed: 'Completed',
-  missed: 'Missed',
-  cancelled: 'Cancelled',
-};
+const COMMIT_TIMEOUT_MS = 10_000; // give up on a write the server never answers
+const RETRY_EVERY_MS = 20_000; // how often to retry a queue that is stuck on a temporary failure
 
 type Store = {
   pickups: Pickup[];
   getPickup: (id: string) => Pickup | undefined;
   /** The first stop that is still open (in progress or scheduled). */
   nextPickup: Pickup | undefined;
+  /**
+   * Records a status change for one of today's pickups. It shows on screen immediately and is
+   * saved on the phone, then sent (with an audit-log entry) as soon as there's a connection.
+   */
   updateStatus: (id: string, status: PickupStatus, detail?: string) => void;
-  lastSynced: Date;
-  refresh: () => void;
+  driver: DriverInfo;
+  /** True until the first batch of pickups has arrived. */
+  loading: boolean;
+  /** Set when Firestore refuses or can't be reached, e.g. the rules aren't deployed. */
+  error: string | null;
+  /** Last time we heard from the server, or null if we haven't yet. */
+  lastSynced: Date | null;
+  /** False when the phone has no connection. */
+  online: boolean;
+  /** How many status changes are saved on the phone but not yet on the server. */
+  pendingCount: number;
+  /** True while changes are being sent or the list is being refreshed. */
+  syncing: boolean;
+  refresh: () => Promise<void>;
 };
 
 const PickupsContext = createContext<Store | null>(null);
 
-function nowLabel() {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+// Everything we've heard from Firestore, tagged with the user it belongs to so that switching
+// accounts can never show the previous driver's data.
+type Remote = {
+  uid: string | null;
+  pickups: PickupBase[] | null; // null until the first snapshot
+  events: PickupEvent[];
+  driverDoc: DriverDoc | null | undefined; // undefined = not loaded, null = no document
+  lastServerSync: Date | null;
+  pendingWrites: boolean;
+  error: string | null;
+};
+
+const emptyRemote = (uid: string | null): Remote => ({
+  uid,
+  pickups: null,
+  events: [],
+  driverDoc: undefined,
+  lastServerSync: null,
+  pendingWrites: false,
+  error: null,
+});
+
+const patch = (prev: Remote, uid: string, changes: Partial<Remote>): Remote => ({
+  ...(prev.uid === uid ? prev : emptyRemote(uid)),
+  ...changes,
+});
+
+// The offline queue, tagged with its owner for the same reason.
+type QueueState = { uid: string | null; items: StatusUpdate[] };
+const NO_QUEUE: StatusUpdate[] = [];
+
+function describeError(e: unknown) {
+  const code = typeof e === 'object' && e !== null && 'code' in e ? String(e.code) : 'unknown';
+  if (__DEV__) console.warn('Firestore error:', code, e);
+  switch (code) {
+    case 'permission-denied':
+      return "Firestore refused the request (permission denied). Publish firestore.rules to the project's database.";
+    case 'not-found':
+      return 'Firestore database not found. Create the (default) database in the Firebase console.';
+    case 'unavailable':
+      return "Can't reach the server. Showing the last data this phone saw.";
+    default:
+      return `Couldn't load your pickups (${code}).`;
+  }
 }
 
 export function PickupsProvider({ children }: { children: ReactNode }) {
-  const [pickups, setPickups] = useState(initialPickups);
-  const [lastSynced, setLastSynced] = useState(() => new Date());
+  const { user } = useAuth();
+  const uid = user?.uid ?? null;
+  const { name, initials } = identityOf(user);
+  const online = useOnline();
+
+  const [today, setToday] = useState(() => dateKey());
+  const [remote, setRemote] = useState<Remote>(() => emptyRemote(null));
+  const [queueState, setQueueState] = useState<QueueState>({ uid: null, items: NO_QUEUE });
+  const [flushing, setFlushing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Latest values for callbacks that outlive a render (listeners, timers, the sender).
+  const live = useRef({ uid, name, online });
+  useEffect(() => {
+    live.current = { uid, name, online };
+  });
+  const seeding = useRef<string | null>(null);
+  const queueRef = useRef<StatusUpdate[]>([]); // the queue, always current (state lags a render)
+  const sending = useRef(false);
+
+  /* ---------- the offline queue ---------- */
+
+  // Load this account's saved queue when it signs in.
+  useEffect(() => {
+    if (!uid) return;
+    let cancelled = false;
+    loadQueue(uid).then((saved) => {
+      if (cancelled) return;
+      // Keep anything queued while this was loading.
+      const merged = [...saved, ...queueRef.current];
+      queueRef.current = merged;
+      setQueueState({ uid, items: merged });
+    });
+    return () => {
+      cancelled = true;
+      queueRef.current = [];
+    };
+  }, [uid]);
+
+  // Every change goes through here: update memory, update the screen, save to the phone.
+  const changeQueue = useCallback((fn: (queue: StatusUpdate[]) => StatusUpdate[]) => {
+    const owner = live.current.uid;
+    if (!owner) return;
+    const next = fn(queueRef.current);
+    queueRef.current = next;
+    setQueueState({ uid: owner, items: next });
+    void saveQueue(owner, next);
+  }, []);
+
+  // Send queued updates to the server, oldest first, for as long as we're online.
+  const send = useCallback(async () => {
+    const owner = live.current.uid;
+    if (!owner || sending.current) return;
+    sending.current = true;
+    setFlushing(true);
+    try {
+      const result = await drainQueue({
+        isOnline: () => live.current.online && live.current.uid === owner,
+        peek: () => queueRef.current[0],
+        commit: (update) => commitUpdate(db, { uid: owner, name: live.current.name }, update),
+        remove: (id) => changeQueue((q) => q.filter((u) => u.id !== id)),
+        timeoutMs: COMMIT_TIMEOUT_MS,
+        onDropped: (update, e) => {
+          if (__DEV__) console.warn('The server rejected a queued update, dropping it:', update, e);
+        },
+      });
+      if (result.sent > 0) setRemote((prev) => patch(prev, owner, { lastServerSync: new Date(), error: null }));
+    } finally {
+      sending.current = false;
+      setFlushing(false);
+    }
+  }, [changeQueue]);
+
+  const queueReady = uid !== null && queueState.uid === uid;
+  const queued = queueReady ? queueState.items : NO_QUEUE;
+
+  // Try as soon as something is queued, or the connection comes back.
+  useEffect(() => {
+    if (queueReady && online && queued.length > 0) void send();
+  }, [queueReady, online, queued.length, send]);
+
+  // And keep trying while something is stuck (e.g. a server hiccup).
+  useEffect(() => {
+    if (!(queueReady && online && queued.length > 0)) return;
+    const timer = setInterval(() => void send(), RETRY_EVERY_MS);
+    return () => clearInterval(timer);
+  }, [queueReady, online, queued.length, send]);
+
+  // Coming back to the app is a good moment to catch up, and to move on to a new day.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      setToday(dateKey());
+      void send();
+    });
+    return () => sub.remove();
+  }, [send]);
+
+  /* ---------- live data from Firestore ---------- */
+
+  // Any change in Firestore (from this phone or another) updates the UI.
+  useEffect(() => {
+    if (!uid) return;
+
+    const fail = (e: unknown) => setRemote((prev) => patch(prev, uid, { error: describeError(e) }));
+
+    // First time on this account/day: file the demo pickups, once.
+    const seed = async () => {
+      const key = `${uid}_${today}`;
+      if (seeding.current === key) return;
+      seeding.current = key;
+      try {
+        await ensureDriver(db, uid);
+        await seedToday(db, { uid, name: live.current.name }, today);
+      } catch (e) {
+        seeding.current = null;
+        fail(e);
+      }
+    };
+
+    const unsubPickups = onSnapshot(
+      pickupsQuery(db, uid, today),
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        setRemote((prev) =>
+          patch(prev, uid, {
+            pickups: snap.docs.map((d) => parsePickup(d.id, d.data())),
+            pendingWrites: snap.metadata.hasPendingWrites,
+            error: null,
+            ...(fromServer ? { lastServerSync: new Date() } : {}),
+          }),
+        );
+        // An empty answer from the cache just means we haven't heard from the server yet.
+        if (snap.empty && fromServer) void seed();
+      },
+      fail,
+    );
+    const unsubEvents = onSnapshot(
+      eventsQuery(db, uid, today),
+      (snap) => setRemote((prev) => patch(prev, uid, { events: snap.docs.map((d) => parseEvent(d.id, d.data())) })),
+      fail,
+    );
+    const unsubDriver = onSnapshot(
+      driverRef(db, uid),
+      (snap) => setRemote((prev) => patch(prev, uid, { driverDoc: snap.exists() ? (snap.data() as DriverDoc) : null })),
+      fail,
+    );
+
+    return () => {
+      unsubPickups();
+      unsubEvents();
+      unsubDriver();
+    };
+  }, [uid, today]);
+
+  /* ---------- what the screens see ---------- */
+
+  const view = remote.uid === uid ? remote : emptyRemote(uid);
+
+  // Queued updates the server already has (sent, but not yet removed from the queue) would show twice.
+  const waiting = useMemo(() => {
+    const onServer = new Set(view.events.map((e) => e.id));
+    return queued.filter((u) => !onServer.has(u.id));
+  }, [queued, view.events]);
+
+  const pickups = useMemo<Pickup[]>(() => {
+    const history = historyByPickup(view.events);
+    const fromServer = [...(view.pickups ?? [])]
+      .sort((a, b) => a.stop - b.stop)
+      .map((p) => ({ ...p, history: history.get(p.id) ?? [] }));
+    return applyQueue(fromServer, waiting, name);
+  }, [view.pickups, view.events, waiting, name]);
+
+  const refresh = useCallback(async () => {
+    if (!uid || !live.current.online) return;
+    setRefreshing(true);
+    try {
+      await send();
+      // Succeeds only if the server answers, which also proves we're really online.
+      await withTimeout(getDocsFromServer(pickupsQuery(db, uid, today)), 8_000);
+      setRemote((prev) => patch(prev, uid, { lastServerSync: new Date() }));
+    } catch {
+      // Couldn't reach the server: keep showing what we have.
+    } finally {
+      setRefreshing(false);
+    }
+  }, [uid, today, send]);
+
+  const driverDoc = view.driverDoc;
+  const driver = useMemo<DriverInfo>(
+    () => ({
+      name,
+      initials,
+      truck: driverDoc?.truck ?? '—',
+      truckType: driverDoc?.truckType ?? '',
+      shift: driverDoc?.shift ?? '—',
+      date: dateLabel(),
+    }),
+    // `today` changes at midnight, which moves the date label with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [name, initials, driverDoc, today],
+  );
 
   const store = useMemo<Store>(
     () => ({
       pickups,
       getPickup: (id) => pickups.find((p) => p.id === id),
       nextPickup: pickups.find((p) => p.status === 'in_progress' || p.status === 'scheduled'),
-      updateStatus: (id, status, detail) => {
-        setPickups((list) =>
-          list.map((p) =>
-            p.id === id
-              ? {
-                  ...p,
-                  status,
-                  history: [
-                    {
-                      title: detail ? `${statusTitle[status]} · ${detail}` : statusTitle[status],
-                      meta: `${nowLabel()} · ${driver.name}`,
-                    },
-                    ...p.history,
-                  ],
-                }
-              : p,
-          ),
-        );
-        setLastSynced(new Date());
-      },
-      lastSynced,
-      refresh: () => setLastSynced(new Date()),
+      updateStatus: (id, status, detail) =>
+        changeQueue((q) => [...q, { id: newId(), pickupId: id, date: today, status, detail, clientAt: Date.now() }]),
+      driver,
+      loading: uid !== null && view.pickups === null && view.error === null,
+      error: view.error,
+      lastSynced: view.lastServerSync,
+      online,
+      pendingCount: waiting.length,
+      syncing: flushing || refreshing || view.pendingWrites,
+      refresh,
     }),
-    [pickups, lastSynced],
+    [
+      pickups,
+      driver,
+      uid,
+      today,
+      changeQueue,
+      view.pickups,
+      view.error,
+      view.lastServerSync,
+      view.pendingWrites,
+      online,
+      waiting.length,
+      flushing,
+      refreshing,
+      refresh,
+    ],
   );
 
   return <PickupsContext.Provider value={store}>{children}</PickupsContext.Provider>;

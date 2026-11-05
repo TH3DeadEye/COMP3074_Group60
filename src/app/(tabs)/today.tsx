@@ -1,17 +1,16 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Icon } from '@/components/Icon';
+import { Icon, type IconName } from '@/components/Icon';
 import { AppButton, Card, JobTag, ProgressSegments, StatusChip } from '@/components/ui';
-import { driver, navigationUrl, usePickups, type Pickup } from '@/data/pickups';
+import { navigationUrl, usePickups, type Pickup } from '@/data/pickups';
 import { colors, fonts, tabular, type } from '@/theme';
 
 // Screen 2 · Today's Pickups
 export default function TodayScreen() {
-  const { pickups, nextPickup, refresh } = usePickups();
-  const [syncing, setSyncing] = useState(false);
+  const { pickups, nextPickup, refresh, driver, syncing, loading, error, online, pendingCount } = usePickups();
   const [showCompleted, setShowCompleted] = useState(false);
 
   const done = pickups.filter((p) => p.status === 'completed');
@@ -22,13 +21,16 @@ export default function TodayScreen() {
   );
   const toGo = pickups.length - done.length - missed.length - closed.length;
 
-  const onRefresh = () => {
-    setSyncing(true);
-    setTimeout(() => {
-      refresh();
-      setSyncing(false);
-    }, 700);
-  };
+  const onRefresh = () => void refresh();
+
+  // The chip in the header: what's going on with the data right now.
+  const sync: { label: string; icon: IconName; bg: string; fg: string } = syncing
+    ? { label: 'Syncing', icon: 'refresh', bg: '#E6E8EC', fg: '#3A4250' }
+    : pendingCount > 0
+      ? { label: `${pendingCount} waiting`, icon: 'clock', bg: colors.note, fg: colors.noteInk }
+      : !online
+        ? { label: 'Offline', icon: 'alert', bg: '#E6E8EC', fg: '#3A4250' }
+        : { label: 'Synced', icon: 'check', bg: colors.successBg, fg: colors.success };
 
   const openPickup = (p: Pickup) => router.push({ pathname: '/pickup/[id]', params: { id: p.id } });
 
@@ -44,14 +46,12 @@ export default function TodayScreen() {
           </Text>
         </View>
         <View style={styles.headerActions}>
-          <View style={[styles.syncChip, syncing && { backgroundColor: '#E6E8EC' }]}>
-            <Icon
-              name={syncing ? 'refresh' : 'check'}
-              size={16}
-              color={syncing ? '#3A4250' : colors.success}
-              strokeWidth={2.2}
-            />
-            <Text style={[styles.syncText, syncing && { color: '#3A4250' }]}>{syncing ? 'Syncing' : 'Synced'}</Text>
+          <View
+            accessibilityLabel={`Sync status: ${sync.label}`}
+            style={[styles.syncChip, { backgroundColor: sync.bg }]}
+          >
+            <Icon name={sync.icon} size={16} color={sync.fg} strokeWidth={2.2} />
+            <Text style={[styles.syncText, { color: sync.fg }]}>{sync.label}</Text>
           </View>
           <Pressable
             accessibilityRole="button"
@@ -81,6 +81,16 @@ export default function TodayScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {error && (
+          <View accessibilityRole="alert" style={styles.errorBanner}>
+            <Icon name="alert" size={20} color={colors.danger} strokeWidth={2.2} />
+            <Text style={styles.errorBannerText}>{error}</Text>
+          </View>
+        )}
+        {loading && (
+          <ActivityIndicator size="large" color={colors.ink} style={{ marginTop: 24 }} accessibilityLabel="Loading pickups" />
+        )}
+
         {nextPickup ? (
           <View style={styles.upNext} accessibilityLabel="Up next">
             <View style={styles.rowBetween}>
@@ -233,6 +243,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.successBg,
   },
   syncText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.success },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: colors.dangerBg,
+  },
+  errorBannerText: { flex: 1, color: colors.danger, fontSize: 15, fontFamily: fonts.semibold },
   roundButton: {
     width: 48,
     height: 48,

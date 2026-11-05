@@ -5,7 +5,7 @@ import Svg, { Path, Rect } from 'react-native-svg';
 
 import { Icon } from '@/components/Icon';
 import { AppButton, Card, JobTag, LocationDot, StatusChip } from '@/components/ui';
-import { driver, jobLabel, navigationUrl, usePickups } from '@/data/pickups';
+import { jobLabel, navigationUrl, usePickups } from '@/data/pickups';
 import { colors, fonts, tabular, type } from '@/theme';
 
 const MAP_W = 358;
@@ -14,7 +14,7 @@ const MAP_H = 150;
 // Screen 3 · Pickup Details
 export default function PickupDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { pickups, getPickup } = usePickups();
+  const { pickups, getPickup, driver } = usePickups();
   const insets = useSafeAreaInsets();
   const pickup = getPickup(id);
 

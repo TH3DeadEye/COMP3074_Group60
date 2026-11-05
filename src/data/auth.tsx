@@ -19,12 +19,17 @@ const toAuthUser = (u: User): AuthUser => ({ uid: u.uid, email: u.email, display
 // Shown once, right after the driver signs in or creates an account (not on every app launch).
 export type Welcome = { firstName: string; isNew: boolean };
 
+// Shown once, right after the driver signs out.
+export type Farewell = { firstName: string };
+
 type AuthState = {
   user: AuthUser | null;
   // True until Firebase has told us whether a saved session exists.
   initializing: boolean;
   welcome: Welcome | null;
   dismissWelcome: () => void;
+  farewell: Farewell | null;
+  dismissFarewell: () => void;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -36,6 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [welcome, setWelcome] = useState<Welcome | null>(null);
+  const [farewell, setFarewell] = useState<Farewell | null>(null);
   // Set just before a sign-in/sign-up so the auth listener knows the next user is a fresh login
   // rather than a session restored at launch.
   const pendingWelcome = useRef<{ isNew: boolean; name?: string } | null>(null);
@@ -48,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const pending = pendingWelcome.current;
       if (next && pending) {
         pendingWelcome.current = null;
+        setFarewell(null);
         // Same update as setUser, so the welcome is on screen the moment the app unlocks.
         setWelcome({ firstName: firstNameOf(pending.name ?? identityOf(toAuthUser(next)).name), isNew: pending.isNew });
       }
@@ -60,7 +67,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       initializing,
       welcome,
       dismissWelcome: () => setWelcome(null),
+      farewell,
+      dismissFarewell: () => setFarewell(null),
       signIn: async (email, password) => {
+        setFarewell(null);
         pendingWelcome.current = { isNew: false };
         try {
           await signInWithEmailAndPassword(auth, email.trim(), password);
@@ -87,10 +97,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       signOut: async () => {
         setWelcome(null);
-        await firebaseSignOut(auth);
+        // Put the message up first so it covers the switch back to the login screen.
+        setFarewell({ firstName: firstNameOf(identityOf(user).name) });
+        try {
+          await firebaseSignOut(auth);
+        } catch (e) {
+          setFarewell(null);
+          throw e;
+        }
       },
     }),
-    [user, initializing, welcome],
+    [user, initializing, welcome, farewell],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

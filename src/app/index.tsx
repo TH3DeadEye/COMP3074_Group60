@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/components/Icon';
 import { AppButton } from '@/components/ui';
 import { signInErrorMessage, useAuth } from '@/data/auth';
+import { useOnline } from '@/data/useOnline';
 import { colors, fonts } from '@/theme';
 
 // Screen 1 · Login
@@ -27,6 +28,8 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const { signIn: signInWithFirebase } = useAuth();
+  const passwordRef = useRef<TextInput>(null);
+  const online = useOnline();
   const showError = error !== null;
 
   // On success the auth state changes and the root layout swaps to the signed-in screens,
@@ -84,6 +87,8 @@ export default function LoginScreen() {
               autoComplete="email"
               keyboardType="email-address"
               textContentType="username"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
               style={[styles.input, showError && styles.inputError]}
             />
           </View>
@@ -94,7 +99,9 @@ export default function LoginScreen() {
             </Text>
             <View>
               <TextInput
+                ref={passwordRef}
                 accessibilityLabelledBy="passwordLabel"
+                returnKeyType="go"
                 value={password}
                 onChangeText={setPassword}
                 placeholder="Password"
@@ -123,10 +130,17 @@ export default function LoginScreen() {
             </View>
           )}
 
+          {!online && (
+            <View accessibilityRole="alert" style={styles.offline}>
+              <Icon name="alert" size={20} color="#3A4250" strokeWidth={2.2} />
+              <Text style={styles.offlineText}>You&apos;re offline. Connect to the internet to sign in.</Text>
+            </View>
+          )}
+
           <AppButton
             label={loading ? 'Signing in…' : 'Sign in'}
             onPress={signIn}
-            disabled={loading}
+            loading={loading}
             style={{ marginTop: 4 }}
           />
 
@@ -212,6 +226,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.dangerBg,
   },
   errorText: { flex: 1, color: colors.danger, fontSize: 15, fontFamily: fonts.semibold },
+  offline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#E6E8EC',
+  },
+  offlineText: { flex: 1, color: '#3A4250', fontSize: 15, fontFamily: fonts.semibold },
   help: { textAlign: 'center', fontSize: 15, color: colors.muted, fontFamily: fonts.regular },
   helpLink: { fontFamily: fonts.semibold, color: colors.ink, textDecorationLine: 'underline' },
   helpDetail: { textAlign: 'center', fontSize: 15, color: colors.ink, fontFamily: fonts.semibold },
