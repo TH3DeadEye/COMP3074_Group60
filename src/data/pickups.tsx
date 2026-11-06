@@ -364,7 +364,3 @@ export function usePickups() {
   return store;
 }
 
-export function navigationUrl(p: Pickup) {
-  const destination = encodeURIComponent(`${p.address} ${p.city}`);
-  return `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
-}

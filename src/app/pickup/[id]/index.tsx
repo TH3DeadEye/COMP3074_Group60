@@ -1,15 +1,13 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path, Rect } from 'react-native-svg';
 
 import { Icon } from '@/components/Icon';
-import { AppButton, Card, JobTag, LocationDot, StatusChip } from '@/components/ui';
-import { jobLabel, navigationUrl, usePickups } from '@/data/pickups';
+import { PickupMapPreview } from '@/components/PickupMapPreview';
+import { AppButton, Card, JobTag, StatusChip } from '@/components/ui';
+import { jobLabel, usePickups } from '@/data/pickups';
+import { openNavigation } from '@/lib/navigation';
 import { colors, fonts, tabular, type } from '@/theme';
-
-const MAP_W = 358;
-const MAP_H = 150;
 
 // Screen 3 · Pickup Details
 export default function PickupDetailsScreen() {
@@ -63,26 +61,10 @@ export default function PickupDetailsScreen() {
           </View>
         </View>
 
-        <View style={styles.mapPreview} accessibilityLabel="Map preview: pickup pin and your location">
-          <Svg width="100%" height="100%" viewBox={`0 0 ${MAP_W} ${MAP_H}`} preserveAspectRatio="none" style={StyleSheet.absoluteFill}>
-            <Rect x="200" y="0" width="90" height="56" fill={colors.mapPark} />
-            <Path d="M0 70 H358" stroke="#FFFFFF" strokeWidth={14} />
-            <Path d="M0 122 H358" stroke="#FFFFFF" strokeWidth={8} />
-            <Path d="M0 22 H358" stroke="#FFFFFF" strokeWidth={8} />
-            <Path d="M96 0 V150" stroke="#FFFFFF" strokeWidth={12} />
-            <Path d="M190 0 V150" stroke="#FFFFFF" strokeWidth={8} />
-            <Path d="M300 0 V150" stroke="#FFFFFF" strokeWidth={8} />
-            <Path d="M96 112 V70 H246" fill="none" stroke={colors.location} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round" />
-          </Svg>
-          <View style={[styles.pinAt, { left: `${(96 / MAP_W) * 100}%`, top: 112, marginLeft: -18, marginTop: -18 }]}>
-            <LocationDot halo={8} />
-          </View>
-          <View style={[styles.pinAt, { left: `${(246 / MAP_W) * 100}%`, top: 54, marginLeft: -20, marginTop: -20 }]}>
-            <View style={styles.previewPin}>
-              <Text style={styles.previewPinText}>{pickup.stop}</Text>
-            </View>
-          </View>
-        </View>
+        <PickupMapPreview
+          pickup={pickup}
+          onPress={() => router.navigate({ pathname: '/map', params: { stop: pickup.id } })}
+        />
 
         <Card style={styles.factsGrid}>
           <Fact label="Window" value={pickup.window} />
@@ -123,7 +105,7 @@ export default function PickupDetailsScreen() {
           icon="navigate"
           variant="hiVis"
           style={{ flex: 1 }}
-          onPress={() => Linking.openURL(navigationUrl(pickup))}
+          onPress={() => openNavigation(pickup)}
         />
         <AppButton
           label="Update status"
@@ -162,26 +144,6 @@ const styles = StyleSheet.create({
   content: { paddingTop: 4, paddingHorizontal: 16, paddingBottom: 20, gap: 16 },
   customer: { fontFamily: fonts.condBold, fontSize: 34, lineHeight: 36, color: colors.ink },
   address: { fontFamily: fonts.regular, fontSize: 17, color: colors.muted },
-  mapPreview: {
-    height: MAP_H,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: colors.mapGround,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  pinAt: { position: 'absolute' },
-  previewPin: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: colors.hiVis,
-    borderWidth: 3,
-    borderColor: colors.ink,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  previewPinText: { fontFamily: fonts.bold, fontSize: 17, color: colors.ink },
   factsGrid: { padding: 16, flexDirection: 'row', flexWrap: 'wrap', rowGap: 16 },
   fact: { width: '50%', gap: 2, paddingRight: 12 },
   factValue: { fontFamily: fonts.semibold, fontSize: 18, color: colors.ink },
