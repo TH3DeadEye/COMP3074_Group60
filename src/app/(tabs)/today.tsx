@@ -1,13 +1,14 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Glass } from '@/components/Glass';
 import { Icon, type IconName } from '@/components/Icon';
 import { useTabBarInset } from '@/components/TabBar';
 import { AppButton, Card, JobTag, ProgressSegments, StatusChip } from '@/components/ui';
-import { navigationUrl, usePickups, type Pickup } from '@/data/pickups';
+import { usePickups, type Pickup } from '@/data/pickups';
+import { openNavigation } from '@/lib/navigation';
 import { colors, fonts, tabular, type } from '@/theme';
 
 // Screen 2 · Today's Pickups
@@ -126,7 +127,7 @@ export default function TodayScreen() {
                 icon="navigate"
                 variant="hiVis"
                 style={{ flex: 1 }}
-                onPress={() => Linking.openURL(navigationUrl(nextPickup))}
+                onPress={() => openNavigation(nextPickup)}
               />
               <AppButton
                 label="Open"

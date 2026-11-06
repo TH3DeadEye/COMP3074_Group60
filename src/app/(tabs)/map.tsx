@@ -1,93 +1,117 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import MapView, { Marker, PROVIDER_GOOGLE, type MapStyleElement } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path, Rect } from 'react-native-svg';
 
 import { Icon } from '@/components/Icon';
 import { useTabBarInset } from '@/components/TabBar';
-import { AppButton, LocationDot, SheetHandle, StatusChip, StopMarker } from '@/components/ui';
-import { navigationUrl, usePickups, type Pickup } from '@/data/pickups';
+import { AppButton, SheetHandle, StatusChip, StopMarker } from '@/components/ui';
+import type { LatLng, Pickup } from '@/data/model';
+import { usePickups } from '@/data/pickups';
+import { locationProblem, useDriverLocation } from '@/lib/location';
+import { formatEta, openNavigation, useEta } from '@/lib/navigation';
 import { colors, fonts, tabular, type } from '@/theme';
 
-// Static mock map drawn in a 390×764 design space and stretched to fit the screen.
-const MAP_W = 390;
-const MAP_H = 764;
-const ME = { x: 150, y: 400 };
+// Downtown Toronto, used until the stops have loaded.
+const START_REGION = { latitude: 43.6532, longitude: -79.3832, latitudeDelta: 0.12, longitudeDelta: 0.12 };
 
-// Rough mock distance from the driver's dot, so each stop shows plausible numbers.
-function eta(p: Pickup) {
-  const km = (Math.abs(p.map.x - ME.x) + Math.abs(p.map.y - ME.y)) * 0.0228;
-  return { km: km.toFixed(1), min: Math.max(2, Math.round(km * 2.6)) };
-}
+// Hide shops, transit and other points of interest so the stops stand out.
+const MAP_STYLE: MapStyleElement[] = [
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+];
 
 // Screen 4 · Route Map
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const tabInset = useTabBarInset();
   const { pickups, nextPickup } = usePickups();
-  const [size, setSize] = useState({ w: MAP_W, h: MAP_H });
-  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  const { stop: focusId } = useLocalSearchParams<{ stop?: string }>();
+  const { location, coords: me, fix } = useDriverLocation();
+  const mapRef = useRef<MapView>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [sheetH, setSheetH] = useState(260);
+  const [selectedId, setSelectedId] = useState<string | undefined>(focusId);
+
+  // Opening the map from a pickup's details selects that pickup.
+  const [seenFocusId, setSeenFocusId] = useState(focusId);
+  if (focusId !== seenFocusId) {
+    setSeenFocusId(focusId);
+    setSelectedId(focusId);
+  }
 
   const selected = pickups.find((p) => p.id === selectedId) ?? nextPickup ?? pickups[pickups.length - 1];
   const doneCount = pickups.filter((p) => p.status === 'completed').length;
-  const sx = size.w / MAP_W;
-  const sy = size.h / MAP_H;
   const isNext = selected?.id === nextPickup?.id;
+  const etaResult = useEta(me, selected?.coords);
+  const eta = formatEta(etaResult);
+  const problem = locationProblem(location);
+
+  const stopCoords = useMemo(
+    () => pickups.map((p) => p.coords).filter((c): c is LatLng => !!c),
+    [pickups],
+  );
+  const padding = { top: insets.top + 110, right: 48, bottom: sheetH + 24, left: 48 };
+
+  // Frame every stop, plus the driver if we know where they are.
+  const fitAll = (withMe = true) => {
+    const points = withMe && me ? [...stopCoords, me] : stopCoords;
+    if (points.length) mapRef.current?.fitToCoordinates(points, { edgePadding: padding, animated: true });
+  };
+
+  // Arriving from a pickup's details centres on that pickup. Otherwise the first view frames all
+  // of today's stops, once the map and the stops have both loaded.
+  const focusCoords = pickups.find((p) => p.id === focusId)?.coords;
+  const framed = useRef(false);
+  useEffect(() => {
+    if (!mapReady) return;
+    if (focusCoords) {
+      mapRef.current?.animateCamera({ center: focusCoords, zoom: 15 }, { duration: 500 });
+      framed.current = true;
+    } else if (!framed.current && stopCoords.length) {
+      framed.current = true;
+      fitAll();
+    }
+    // fitAll reads the latest padding and position; re-running for those would jump the camera.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, focusCoords?.latitude, focusCoords?.longitude, stopCoords.length]);
+
+  const recentre = () => {
+    setSelectedId(undefined);
+    if (me) mapRef.current?.animateCamera({ center: me, zoom: 15 }, { duration: 500 });
+    else fitAll(false);
+  };
 
   return (
     <View style={styles.screen}>
-      <View
+      <MapView
+        ref={mapRef}
+        provider={PROVIDER_GOOGLE}
         style={StyleSheet.absoluteFill}
-        onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
+        initialRegion={START_REGION}
+        customMapStyle={MAP_STYLE}
+        showsUserLocation={location.state === 'ready'}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        toolbarEnabled={false}
+        mapPadding={{ top: 0, right: 0, bottom: sheetH, left: 0 }}
+        onMapReady={() => setMapReady(true)}
         accessibilityLabel="Map of today's stops"
       >
-        <Svg width="100%" height="100%" viewBox={`0 0 ${MAP_W} ${MAP_H}`} preserveAspectRatio="none">
-          <Rect x="166" y="122" width="82" height="96" rx="6" fill={colors.mapPark} />
-          <Rect x="0" y="470" width="130" height="80" rx="6" fill={colors.mapWater} />
-          <Path d="M0 110 H390" stroke="#FFFFFF" strokeWidth={10} />
-          <Path d="M0 230 H390" stroke="#FFFFFF" strokeWidth={16} />
-          <Path d="M0 330 H390" stroke="#FFFFFF" strokeWidth={10} />
-          <Path d="M130 450 H390" stroke="#FFFFFF" strokeWidth={8} />
-          <Path d="M0 600 H390" stroke="#FFFFFF" strokeWidth={10} />
-          <Path d="M40 0 V470" stroke="#FFFFFF" strokeWidth={8} />
-          <Path d="M150 0 V764" stroke="#FFFFFF" strokeWidth={16} />
-          <Path d="M260 0 V764" stroke="#FFFFFF" strokeWidth={10} />
-          <Path d="M345 0 V764" stroke="#FFFFFF" strokeWidth={8} />
-          <Path d="M0 700 L390 380" stroke="#FFFFFF" strokeWidth={10} />
-          {selected && (
-            <Path
-              d={`M${ME.x} ${ME.y} V${selected.map.y} H${selected.map.x}`}
-              fill="none"
-              stroke={colors.location}
-              strokeWidth={6}
-              strokeLinecap="round"
-              strokeLinejoin="round"
+        {pickups.map((p) =>
+          p.coords ? (
+            <StopPin
+              // A new key when the look changes remounts the pin, so Google Maps redraws it.
+              key={`${p.id}-${p.status}-${p.id === nextPickup?.id}`}
+              pickup={p}
+              coords={p.coords}
+              isNext={p.id === nextPickup?.id}
+              onPress={() => setSelectedId(p.id)}
             />
-          )}
-        </Svg>
-
-        <View style={[styles.abs, { left: ME.x * sx - 22, top: ME.y * sy - 22 }]}>
-          <LocationDot />
-        </View>
-
-        {pickups.map((p) => {
-          const next = p.id === nextPickup?.id;
-          const half = next ? 24 : 18;
-          return (
-            <View key={p.id} style={[styles.abs, { left: p.map.x * sx - half, top: p.map.y * sy - half }]}>
-              {next && (
-                <View style={styles.nextLabel}>
-                  <Text style={styles.nextLabelText} numberOfLines={1}>
-                    Next · {p.customer.split(' ')[0]}
-                  </Text>
-                </View>
-              )}
-              <StopMarker pickup={p} isNext={next} onPress={() => setSelectedId(p.id)} />
-            </View>
-          );
-        })}
-      </View>
+          ) : null,
+        )}
+      </MapView>
 
       <View style={[styles.topBar, { top: insets.top + 16 }]} pointerEvents="box-none">
         <View style={styles.titleCard}>
@@ -100,18 +124,28 @@ export default function MapScreen() {
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Re-centre on my location"
-          onPress={() => setSelectedId(undefined)}
+          accessibilityLabel={me ? 'Re-centre on my location' : 'Show all stops'}
+          onPress={recentre}
           style={({ pressed }) => [styles.locateButton, pressed && { opacity: 0.8 }]}
         >
           <Icon name="locate" size={24} color={colors.location} />
         </Pressable>
       </View>
 
+      {problem && (
+        <View style={[styles.banner, { top: insets.top + 96 }]}>
+          <Text style={styles.bannerText}>{problem}</Text>
+          <Pressable accessibilityRole="button" onPress={fix} hitSlop={8}>
+            <Text style={styles.bannerAction}>Turn on</Text>
+          </Pressable>
+        </View>
+      )}
+
       {selected && (
         // The glass tab bar floats over the bottom of the sheet, so the sheet's content stops above it.
         <View
           style={[styles.sheet, { paddingBottom: tabInset }]}
+          onLayout={(e) => setSheetH(e.nativeEvent.layout.height)}
           accessibilityLabel={isNext ? 'Next stop' : 'Selected stop'}
         >
           <SheetHandle />
@@ -127,17 +161,25 @@ export default function MapScreen() {
               {selected.address} · {selected.window}
             </Text>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 18 }}>
-            <Text style={[styles.distance, tabular]}>{eta(selected).km} km</Text>
-            <Text style={[styles.distance, tabular]}>~{eta(selected).min} min</Text>
-          </View>
+          {me && selected.coords ? (
+            <View
+              style={{ flexDirection: 'row', alignItems: 'baseline', gap: 18 }}
+              accessibilityLabel={`${eta.km} kilometres, about ${eta.min} minutes`}
+            >
+              <Text style={[styles.distance, tabular]}>{eta.km} km</Text>
+              <Text style={[styles.distance, tabular]}>~{eta.min} min</Text>
+              {etaResult?.approx && <Text style={styles.approx}>estimate</Text>}
+            </View>
+          ) : (
+            <Text style={styles.address}>Turn on location to see the distance.</Text>
+          )}
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <AppButton
               label="Start navigation"
               icon="navigate"
               variant="hiVis"
               style={{ flex: 1 }}
-              onPress={() => Linking.openURL(navigationUrl(selected))}
+              onPress={() => openNavigation(selected)}
             />
             <AppButton
               label="Details"
@@ -151,14 +193,55 @@ export default function MapScreen() {
   );
 }
 
+// A numbered stop on the map. Google Maps draws custom markers as a still image, so a new pin
+// tracks changes only for its first moment (to capture the fonts and icon), then stops; otherwise
+// it redraws every frame and the map stutters. The parent's key remounts it when its look changes.
+function StopPin({
+  pickup,
+  coords,
+  isNext,
+  onPress,
+}: {
+  pickup: Pickup;
+  coords: LatLng;
+  isNext: boolean;
+  onPress: () => void;
+}) {
+  const [tracks, setTracks] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setTracks(false), 700);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <Marker
+      coordinate={coords}
+      onPress={onPress}
+      tracksViewChanges={tracks}
+      // Anchor on the centre of the circle, which sits under the "Next" label when there is one.
+      anchor={{ x: 0.5, y: isNext ? 60 / 84 : 0.5 }}
+      zIndex={isNext ? 10 : 1}
+      accessibilityLabel={`Stop ${pickup.stop}, ${pickup.customer}`}
+    >
+      <View style={{ alignItems: 'center' }}>
+        {isNext && (
+          <View style={styles.nextLabel}>
+            <Text style={styles.nextLabelText} numberOfLines={1}>
+              Next · {pickup.customer.split(' ')[0]}
+            </Text>
+          </View>
+        )}
+        <StopMarker pickup={pickup} isNext={isNext} />
+      </View>
+    </Marker>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.mapGround, overflow: 'hidden' },
-  abs: { position: 'absolute', alignItems: 'center' },
   nextLabel: {
-    position: 'absolute',
-    bottom: '100%',
-    marginBottom: 8,
     height: 28,
+    marginBottom: 8,
     paddingHorizontal: 10,
     borderRadius: 8,
     backgroundColor: colors.ink,
@@ -200,6 +283,20 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
+  banner: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    backgroundColor: colors.ink,
+  },
+  bannerText: { flex: 1, fontFamily: fonts.medium, fontSize: 15, color: colors.surface },
+  bannerAction: { fontFamily: fonts.bold, fontSize: 15, color: colors.hiVis },
   sheet: {
     position: 'absolute',
     left: 0,
@@ -222,4 +319,5 @@ const styles = StyleSheet.create({
   customer: { fontFamily: fonts.condBold, fontSize: 28, lineHeight: 31, color: colors.ink },
   address: { fontFamily: fonts.regular, fontSize: 16, color: colors.muted },
   distance: { fontFamily: fonts.condBold, fontSize: 30, color: colors.distance },
+  approx: { fontFamily: fonts.medium, fontSize: 14, color: colors.muted },
 });

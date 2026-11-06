@@ -16,6 +16,7 @@ import {
   timeLabel,
   type HistoryEntry,
   type JobType,
+  type LatLng,
   type Pickup,
   type PickupStatus,
   type StatusUpdate,
@@ -59,6 +60,17 @@ export const eventsQuery = (db: Firestore, uid: string, date: string) =>
 
 export const driverRef = (db: Firestore, uid: string) => doc(db, 'drivers', uid);
 
+// Pickups store { lat, lng }. Demo pickups seeded before coordinates existed have none, and a driver
+// can't add them (rules allow status changes only), so those fall back to the seed's coordinates.
+function parseCoords(d: DocumentData): LatLng | undefined {
+  const lat = Number(d.lat);
+  const lng = Number(d.lng);
+  if (d.lat != null && d.lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
+    return { latitude: lat, longitude: lng };
+  }
+  return SEED_PICKUPS.find((sp) => sp.stop === Number(d.stop) && sp.customer === d.customer)?.coords;
+}
+
 export function parsePickup(id: string, d: DocumentData): PickupBase {
   return {
     id,
@@ -71,6 +83,7 @@ export function parsePickup(id: string, d: DocumentData): PickupBase {
     material: String(d.material ?? ''),
     note: typeof d.note === 'string' && d.note ? d.note : undefined,
     status: d.status as PickupStatus,
+    coords: parseCoords(d),
     map: { x: Number(d.map?.x) || 0, y: Number(d.map?.y) || 0 },
   };
 }
@@ -151,6 +164,8 @@ export async function seedToday(db: Firestore, who: Who, date: string) {
       material: sp.material,
       ...(sp.note ? { note: sp.note } : {}),
       status: sp.status,
+      lat: sp.coords.latitude,
+      lng: sp.coords.longitude,
       map: sp.map,
       updatedAt: serverTimestamp(),
     });

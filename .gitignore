@@ -44,3 +44,6 @@ yarn-error.*
 
 # IDE
 .idea/
+
+# Firebase config, each developer gets it from the Firebase console
+google-services.json
