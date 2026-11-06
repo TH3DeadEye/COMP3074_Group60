@@ -3,7 +3,9 @@ import { useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Glass } from '@/components/Glass';
 import { Icon, type IconName } from '@/components/Icon';
+import { useTabBarInset } from '@/components/TabBar';
 import { AppButton, Card, JobTag, ProgressSegments, StatusChip } from '@/components/ui';
 import { navigationUrl, usePickups, type Pickup } from '@/data/pickups';
 import { colors, fonts, tabular, type } from '@/theme';
@@ -12,6 +14,7 @@ import { colors, fonts, tabular, type } from '@/theme';
 export default function TodayScreen() {
   const { pickups, nextPickup, refresh, driver, syncing, loading, error, online, pendingCount } = usePickups();
   const [showCompleted, setShowCompleted] = useState(false);
+  const tabInset = useTabBarInset();
 
   const done = pickups.filter((p) => p.status === 'completed');
   const missed = pickups.filter((p) => p.status === 'missed');
@@ -46,13 +49,16 @@ export default function TodayScreen() {
           </Text>
         </View>
         <View style={styles.headerActions}>
-          <View
+          <Glass
             accessibilityLabel={`Sync status: ${sync.label}`}
-            style={[styles.syncChip, { backgroundColor: sync.bg }]}
+            style={styles.syncChip}
+            scheme="light"
+            tint={sync.bg}
+            fallbackColor={sync.bg}
           >
             <Icon name={sync.icon} size={16} color={sync.fg} strokeWidth={2.2} />
             <Text style={[styles.syncText, { color: sync.fg }]}>{sync.label}</Text>
-          </View>
+          </Glass>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Refresh pickups"
@@ -78,7 +84,7 @@ export default function TodayScreen() {
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: tabInset }]}
         showsVerticalScrollIndicator={false}
       >
         {error && (
@@ -240,7 +246,6 @@ const styles = StyleSheet.create({
     height: 32,
     paddingHorizontal: 12,
     borderRadius: 16,
-    backgroundColor: colors.successBg,
   },
   syncText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.success },
   errorBanner: {

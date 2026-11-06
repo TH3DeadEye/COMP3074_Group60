@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
 
+import { AuthBackdrop } from '@/components/AuthBackdrop';
+import { Glass } from '@/components/Glass';
 import { Icon, type IconName } from '@/components/Icon';
 import { colors, fonts } from '@/theme';
 
@@ -132,7 +134,9 @@ export function SessionOverlay({
     value.interpolate({ inputRange: [0, 1], outputRange: [distance, 0] });
 
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, { opacity: root }]}>
+    <Animated.View style={[StyleSheet.absoluteFill, styles.root, { opacity: root }]}>
+      {/* The same drifting shapes as the sign-in screens, dimmed so the big text stays easy to read. */}
+      <AuthBackdrop strength={0.6} />
       <Pressable
         onPress={leave}
         accessibilityRole="button"
@@ -141,14 +145,18 @@ export function SessionOverlay({
       >
         <Animated.View
           style={[
-            styles.logo,
+            styles.logoWrap,
             {
               opacity: logo.interpolate({ inputRange: [0, 0.4], outputRange: [0, 1], extrapolate: 'clamp' }),
               transform: [{ scale: logo.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }],
             },
           ]}
         >
-          <Icon name={icon} size={44} color={colors.ink} strokeWidth={icon === 'check' ? 3 : undefined} />
+          {/* A solid yellow tile, so the icon always stands out; a clear glass layer on top adds the sheen. */}
+          <View style={styles.logo}>
+            <Glass style={styles.logoGlass} effect="clear" scheme="light" fallbackColor="transparent" pointerEvents="none" />
+            <Icon name={icon} size={44} color={colors.ink} strokeWidth={icon === 'check' ? 3 : undefined} />
+          </View>
         </Animated.View>
 
         <Animated.Text style={[styles.label, { opacity: label, transform: [{ translateY: rise(label, 14) }] }]}>
@@ -170,14 +178,15 @@ export function SessionOverlay({
 }
 
 const styles = StyleSheet.create({
+  root: { backgroundColor: colors.ink },
   screen: {
     flex: 1,
-    backgroundColor: colors.ink,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
     gap: 6,
   },
+  logoWrap: { marginBottom: 28 },
   logo: {
     width: 96,
     height: 96,
@@ -185,8 +194,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.hiVis,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 28,
+    overflow: 'hidden',
   },
+  logoGlass: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 26 },
   label: {
     fontFamily: fonts.bold,
     fontSize: 16,

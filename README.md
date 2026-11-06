@@ -35,6 +35,18 @@ To build and run the native Android app:
 npm run android
 ```
 
+## Liquid glass
+
+The login card, tab bar and a few accents use a glass look that depends on the device:
+
+| Where | What you get |
+| --- | --- |
+| iOS 26 or later | Apple's real liquid glass (`expo-glass-effect`) |
+| Android 13+ in a development build (`npm run android`) | A shader-based glass (`@uginy/react-native-liquid-glass`) with refraction and edge glow |
+| Expo Go, older iOS/Android, or Reduce Transparency on | A plain translucent panel in the same shape |
+
+The Android library is native code, so after pulling this change run `npm run android` once to rebuild. It is excluded from iOS builds on purpose.
+
 ## How the data works
 
 Each signed-in driver only ever sees their own data, and the app updates live when anything changes in Firestore.

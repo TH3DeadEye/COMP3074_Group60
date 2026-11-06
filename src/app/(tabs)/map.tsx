@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Rect } from 'react-native-svg';
 
 import { Icon } from '@/components/Icon';
+import { useTabBarInset } from '@/components/TabBar';
 import { AppButton, LocationDot, SheetHandle, StatusChip, StopMarker } from '@/components/ui';
 import { navigationUrl, usePickups, type Pickup } from '@/data/pickups';
 import { colors, fonts, tabular, type } from '@/theme';
@@ -23,6 +24,7 @@ function eta(p: Pickup) {
 // Screen 4 · Route Map
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
+  const tabInset = useTabBarInset();
   const { pickups, nextPickup } = usePickups();
   const [size, setSize] = useState({ w: MAP_W, h: MAP_H });
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
@@ -107,7 +109,11 @@ export default function MapScreen() {
       </View>
 
       {selected && (
-        <View style={styles.sheet} accessibilityLabel={isNext ? 'Next stop' : 'Selected stop'}>
+        // The glass tab bar floats over the bottom of the sheet, so the sheet's content stops above it.
+        <View
+          style={[styles.sheet, { paddingBottom: tabInset }]}
+          accessibilityLabel={isNext ? 'Next stop' : 'Selected stop'}
+        >
           <SheetHandle />
           <View style={styles.rowBetween}>
             <Text style={type.label}>
