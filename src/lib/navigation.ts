@@ -5,6 +5,11 @@ import type { LatLng, Pickup } from '@/data/model';
 
 const API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 
+if (__DEV__ && !API_KEY) {
+  console.warn('[maps] EXPO_PUBLIC_GOOGLE_MAPS_API_KEY is not set. ETAs will be estimates and the map may be blank.');
+}
+
+
 // The key is restricted to our Android app. Google checks these two headers on REST calls
 // (the Routes API) to tell that the request comes from that app. The SHA-1 is the team's shared
 // debug keystore (android/app/debug.keystore); a release build needs its own SHA-1 added to the key.
