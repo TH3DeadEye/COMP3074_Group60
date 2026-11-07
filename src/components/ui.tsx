@@ -159,7 +159,7 @@ export function ProgressSegments({
   return (
     <View style={{ flexDirection: 'row', gap }} importantForAccessibility="no-hide-descendants">
       {pickups.map((p) => {
-        let bg = colors.line;
+        let bg = colors.track;
         if (p.status === 'completed') bg = colors.doneMarker;
         else if (p.status === 'missed') bg = colors.danger;
         else if (p.id === nextId) bg = colors.hiVis;
