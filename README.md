@@ -9,7 +9,8 @@ This is a prototype. Sign-in uses Firebase Authentication (email and password) a
 - Expo + React Native
 - TypeScript
 - Expo Router (file-based routing)
-- react-native-svg for icons and the route map
+- react-native-svg for icons
+- react-native-maps (Google Maps) and expo-location for the route map
 - Firebase Authentication and Cloud Firestore (JS SDK)
 
 ## Getting started
