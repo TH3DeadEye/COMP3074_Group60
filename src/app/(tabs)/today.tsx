@@ -8,7 +8,8 @@ import { Icon, type IconName } from '@/components/Icon';
 import { useTabBarInset } from '@/components/TabBar';
 import { AppButton, Card, JobTag, ProgressSegments, StatusChip } from '@/components/ui';
 import { usePickups, type Pickup } from '@/data/pickups';
-import { openNavigation } from '@/lib/navigation';
+import { useDriverLocation } from '@/lib/location';
+import { formatEta, openNavigation, useEta } from '@/lib/navigation';
 import { colors, fonts, tabular, type } from '@/theme';
 
 // Screen 2 · Today's Pickups
