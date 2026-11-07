@@ -1,12 +1,13 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Glass } from '@/components/Glass';
 import { Icon, type IconName } from '@/components/Icon';
+import { EmptyState, ErrorBanner, LoadingState } from '@/components/ScreenState';
 import { useTabBarInset } from '@/components/TabBar';
-import { AppButton, Card, JobTag, ProgressSegments, StatusChip } from '@/components/ui';
+import { AppButton, Card, JobTag, ProgressSegments, StatusChip, SummaryChip } from '@/components/ui';
 import { navigationUrl, usePickups, type Pickup } from '@/data/pickups';
 import { colors, fonts, tabular, type } from '@/theme';
 
@@ -14,7 +15,11 @@ import { colors, fonts, tabular, type } from '@/theme';
 export default function TodayScreen() {
   const { pickups, nextPickup, refresh, driver, syncing, loading, error, online, pendingCount } = usePickups();
   const [showCompleted, setShowCompleted] = useState(false);
+  // Only the pull gesture drives the pull spinner; background syncs show in the chip instead.
+  const [pulling, setPulling] = useState(false);
   const tabInset = useTabBarInset();
+  const empty = !loading && !error && pickups.length === 0;
+  const hasTruck = driver.truck !== '—';
 
   const done = pickups.filter((p) => p.status === 'completed');
   const missed = pickups.filter((p) => p.status === 'missed');
@@ -25,6 +30,14 @@ export default function TodayScreen() {
   const toGo = pickups.length - done.length - missed.length - closed.length;
 
   const onRefresh = () => void refresh();
+  const onPull = async () => {
+    setPulling(true);
+    try {
+      await refresh();
+    } finally {
+      setPulling(false);
+    }
+  };
 
   // The chip in the header: what's going on with the data right now.
   const sync: { label: string; icon: IconName; bg: string; fg: string } = syncing
@@ -42,7 +55,8 @@ export default function TodayScreen() {
       <View style={styles.header}>
         <View style={{ gap: 2 }}>
           <Text style={styles.subtitle}>
-            {driver.date} · Truck {driver.truck}
+            {driver.date}
+            {hasTruck && ` · Truck ${driver.truck}`}
           </Text>
           <Text style={type.screenTitle} accessibilityRole="header">
             Today
@@ -70,127 +84,174 @@ export default function TodayScreen() {
         </View>
       </View>
 
-      <View style={styles.progress}>
-        <View style={styles.progressText}>
-          <Text style={[styles.progressStrong, tabular]}>
+      {pickups.length > 0 && (
+        <View style={styles.progress}>
+          <Text style={[styles.progressStrong, tabular]} accessibilityRole="summary">
             {done.length} of {pickups.length} done
           </Text>
-          <Text style={[styles.progressMuted, tabular]}>
-            {toGo} to go · {missed.length} missed
-          </Text>
+          <View style={styles.chips}>
+            <SummaryChip status="completed" count={done.length} label="Done" />
+            <SummaryChip status="scheduled" count={toGo} label="To go" />
+            {missed.length > 0 && <SummaryChip status="missed" count={missed.length} label="Missed" />}
+            {closed.length > 0 && <SummaryChip status="cancelled" count={closed.length} label="Cancelled" />}
+          </View>
+          <ProgressSegments pickups={pickups} nextId={nextPickup?.id} />
         </View>
-        <ProgressSegments pickups={pickups} nextId={nextPickup?.id} />
-      </View>
+      )}
 
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={[styles.content, { paddingBottom: tabInset }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={pulling}
+            onRefresh={onPull}
+            tintColor={colors.ink}
+            colors={[colors.ink]}
+            accessibilityLabel="Pull to refresh pickups"
+          />
+        }
       >
-        {error && (
-          <View accessibilityRole="alert" style={styles.errorBanner}>
-            <Icon name="alert" size={20} color={colors.danger} strokeWidth={2.2} />
-            <Text style={styles.errorBannerText}>{error}</Text>
-          </View>
-        )}
-        {loading && (
-          <ActivityIndicator size="large" color={colors.ink} style={{ marginTop: 24 }} accessibilityLabel="Loading pickups" />
-        )}
+        {error && <ErrorBanner message={error} onRetry={onRefresh} />}
 
-        {nextPickup ? (
-          <View style={styles.upNext} accessibilityLabel="Up next">
-            <View style={styles.rowBetween}>
-              <Text style={styles.upNextLabel}>
-                {nextPickup.status === 'in_progress' ? 'On site' : 'Up next'} · Stop {nextPickup.stop}
-              </Text>
-              <JobTag job={nextPickup.job} onInk />
-            </View>
-            <View style={{ gap: 2 }}>
-              <Text style={[styles.upNextWindow, tabular]}>{nextPickup.window}</Text>
-              <Text style={styles.upNextCustomer}>{nextPickup.customer}</Text>
-              <Text style={styles.upNextAddress}>
-                {nextPickup.address} · {nextPickup.material}
-              </Text>
-            </View>
-            {nextPickup.note && (
-              <View style={styles.upNextNote}>
-                <Icon name="note" size={20} color={colors.hiVis} />
-                <Text style={styles.upNextNoteText}>
-                  <Text style={{ color: colors.hiVis, fontFamily: fonts.bold }}>Note:</Text> {nextPickup.note}
-                </Text>
-              </View>
-            )}
-            <View style={styles.twoCol}>
-              <AppButton
-                label="Navigate"
-                icon="navigate"
-                variant="hiVis"
-                style={{ flex: 1 }}
-                onPress={() => Linking.openURL(navigationUrl(nextPickup))}
-              />
-              <AppButton
-                label="Open"
-                variant="outlineOnInk"
-                style={{ flex: 1 }}
-                onPress={() => openPickup(nextPickup)}
-              />
-            </View>
-          </View>
+        {loading ? (
+          <LoadingState label="Loading today's pickups…" />
+        ) : empty ? (
+          <EmptyState
+            icon="list"
+            title="No pickups today"
+            body={online ? 'Dispatch hasn’t assigned any stops yet. Pull down to check again.' : 'You’re offline. Connect to check for new stops.'}
+            action={{ label: 'Refresh', icon: 'refresh', onPress: onRefresh, loading: syncing }}
+          />
         ) : (
-          <Card style={styles.allDone}>
-            <Icon name="check" size={28} color="#17663A" strokeWidth={2.8} />
-            <Text style={styles.allDoneTitle}>All stops handled</Text>
-            <Text style={styles.progressMuted}>Head back to the yard when you&apos;re ready.</Text>
-          </Card>
-        )}
-
-        {later.length > 0 && (
-          <>
-            <Text style={[type.sectionHeading, { marginTop: 6, marginHorizontal: 4 }]}>Later today</Text>
-            <Card>
-              {later.map((p, i) => (
-                <PickupRow key={p.id} pickup={p} last={i === later.length - 1} onPress={() => openPickup(p)} />
-              ))}
-            </Card>
-          </>
-        )}
-
-        {missed.length > 0 && (
-          <>
-            <Text style={[type.sectionHeading, { marginTop: 6, marginHorizontal: 4 }]}>Missed</Text>
-            <Card>
-              {missed.map((p, i) => (
-                <PickupRow key={p.id} pickup={p} last={i === missed.length - 1} onPress={() => openPickup(p)} />
-              ))}
-            </Card>
-          </>
-        )}
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ expanded: showCompleted }}
-          onPress={() => setShowCompleted((v) => !v)}
-          style={styles.completedBar}
-        >
-          <View style={styles.inlineRow}>
-            <Icon name="check" size={20} color="#17663A" strokeWidth={2.4} />
-            <Text style={styles.completedText}>Completed · {done.length}</Text>
-          </View>
-          <View style={[styles.inlineRow, { gap: 4 }]}>
-            <Text style={styles.completedText}>{showCompleted ? 'Hide' : 'Show'}</Text>
-            <Icon name={showCompleted ? 'chevronUp' : 'chevronDown'} size={18} color="#17663A" strokeWidth={2.2} />
-          </View>
-        </Pressable>
-
-        {showCompleted && done.length > 0 && (
-          <Card>
-            {done.map((p, i) => (
-              <PickupRow key={p.id} pickup={p} last={i === done.length - 1} onPress={() => openPickup(p)} />
-            ))}
-          </Card>
+          <TodayList
+            nextPickup={nextPickup}
+            later={later}
+            missed={missed}
+            done={done}
+            showCompleted={showCompleted}
+            onToggleCompleted={() => setShowCompleted((v) => !v)}
+            openPickup={openPickup}
+          />
         )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function TodayList({
+  nextPickup,
+  later,
+  missed,
+  done,
+  showCompleted,
+  onToggleCompleted,
+  openPickup,
+}: {
+  nextPickup: Pickup | undefined;
+  later: Pickup[];
+  missed: Pickup[];
+  done: Pickup[];
+  showCompleted: boolean;
+  onToggleCompleted: () => void;
+  openPickup: (p: Pickup) => void;
+}) {
+  return (
+    <>
+      {nextPickup ? (
+        <View style={styles.upNext} accessibilityLabel="Up next">
+          <View style={styles.rowBetween}>
+            <Text style={styles.upNextLabel}>
+              {nextPickup.status === 'in_progress' ? 'On site' : 'Up next'} · Stop {nextPickup.stop}
+            </Text>
+            <JobTag job={nextPickup.job} onInk />
+          </View>
+          <View style={{ gap: 2 }}>
+            <Text style={[styles.upNextWindow, tabular]}>{nextPickup.window}</Text>
+            <Text style={styles.upNextCustomer}>{nextPickup.customer}</Text>
+            <Text style={styles.upNextAddress}>
+              {nextPickup.address} · {nextPickup.material}
+            </Text>
+          </View>
+          {nextPickup.note && (
+            <View style={styles.upNextNote}>
+              <Icon name="note" size={20} color={colors.hiVis} />
+              <Text style={styles.upNextNoteText}>
+                <Text style={{ color: colors.hiVis, fontFamily: fonts.bold }}>Note:</Text> {nextPickup.note}
+              </Text>
+            </View>
+          )}
+          <View style={styles.twoCol}>
+            <AppButton
+              label="Navigate"
+              icon="navigate"
+              variant="hiVis"
+              style={{ flex: 1 }}
+              onPress={() => Linking.openURL(navigationUrl(nextPickup))}
+            />
+            <AppButton
+              label="Open"
+              variant="outlineOnInk"
+              style={{ flex: 1 }}
+              onPress={() => openPickup(nextPickup)}
+            />
+          </View>
+        </View>
+      ) : (
+        <Card style={styles.allDone}>
+          <Icon name="check" size={28} color="#17663A" strokeWidth={2.8} />
+          <Text style={styles.allDoneTitle}>All stops handled</Text>
+          <Text style={styles.progressMuted}>Head back to the yard when you&apos;re ready.</Text>
+        </Card>
+      )}
+
+      {later.length > 0 && (
+        <>
+          <Text style={[type.sectionHeading, { marginTop: 6, marginHorizontal: 4 }]}>Later today</Text>
+          <Card>
+            {later.map((p, i) => (
+              <PickupRow key={p.id} pickup={p} last={i === later.length - 1} onPress={() => openPickup(p)} />
+            ))}
+          </Card>
+        </>
+      )}
+
+      {missed.length > 0 && (
+        <>
+          <Text style={[type.sectionHeading, { marginTop: 6, marginHorizontal: 4 }]}>Missed</Text>
+          <Card>
+            {missed.map((p, i) => (
+              <PickupRow key={p.id} pickup={p} last={i === missed.length - 1} onPress={() => openPickup(p)} />
+            ))}
+          </Card>
+        </>
+      )}
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showCompleted }}
+        onPress={onToggleCompleted}
+        style={styles.completedBar}
+      >
+        <View style={styles.inlineRow}>
+          <Icon name="check" size={20} color="#17663A" strokeWidth={2.4} />
+          <Text style={styles.completedText}>Completed · {done.length}</Text>
+        </View>
+        <View style={[styles.inlineRow, { gap: 4 }]}>
+          <Text style={styles.completedText}>{showCompleted ? 'Hide' : 'Show'}</Text>
+          <Icon name={showCompleted ? 'chevronUp' : 'chevronDown'} size={18} color="#17663A" strokeWidth={2.2} />
+        </View>
+      </Pressable>
+
+      {showCompleted && done.length > 0 && (
+        <Card>
+          {done.map((p, i) => (
+            <PickupRow key={p.id} pickup={p} last={i === done.length - 1} onPress={() => openPickup(p)} />
+          ))}
+        </Card>
+      )}
+    </>
   );
 }
 
@@ -248,16 +309,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   syncText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.success },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: colors.dangerBg,
-  },
-  errorBannerText: { flex: 1, color: colors.danger, fontSize: 15, fontFamily: fonts.semibold },
   roundButton: {
     width: 48,
     height: 48,
@@ -268,8 +319,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  progress: { paddingHorizontal: 20, paddingBottom: 16, gap: 8 },
-  progressText: { flexDirection: 'row', justifyContent: 'space-between' },
+  progress: { paddingHorizontal: 20, paddingBottom: 16, gap: 10 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   progressStrong: { fontFamily: fonts.semibold, fontSize: 15, color: colors.ink },
   progressMuted: { fontFamily: fonts.semibold, fontSize: 15, color: colors.muted },
   content: { paddingHorizontal: 16, paddingBottom: 20, gap: 12 },

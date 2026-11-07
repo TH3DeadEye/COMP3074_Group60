@@ -44,3 +44,7 @@ yarn-error.*
 
 # IDE
 .idea/
+
+#firebase
+
+google-services.json

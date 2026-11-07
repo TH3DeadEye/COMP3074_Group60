@@ -42,6 +42,23 @@ export function StatusChip({ status, size = 'md' }: { status: PickupStatus; size
   );
 }
 
+/* ---------- Summary chip: a count of stops in one status ("3 Done") ---------- */
+
+export function SummaryChip({ status, count, label }: { status: PickupStatus; count: number; label: string }) {
+  const look = statusLook[status];
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${count} ${label.toLowerCase()}`}
+      style={[styles.chip, styles.summaryChip, { backgroundColor: look.bg }]}
+    >
+      <Icon name={look.icon} size={15} color={look.fg} strokeWidth={look.iconStroke} />
+      <Text style={[styles.summaryCount, { color: look.fg }]}>{count}</Text>
+      <Text style={[styles.summaryLabel, { color: look.fg }]}>{label}</Text>
+    </View>
+  );
+}
+
 /* ---------- Job tag ---------- */
 
 export function JobTag({ job, onInk = false }: { job: JobType; onInk?: boolean }) {
@@ -219,6 +236,9 @@ const styles = StyleSheet.create({
     gap: 6,
     borderRadius: 17,
   },
+  summaryChip: { height: 32, paddingHorizontal: 12, borderRadius: 16, gap: 5 },
+  summaryCount: { fontFamily: fonts.bold, fontSize: 15, fontVariant: ['tabular-nums'] },
+  summaryLabel: { fontFamily: fonts.semibold, fontSize: 14 },
   jobTag: {
     paddingHorizontal: 10,
     paddingVertical: 4,
