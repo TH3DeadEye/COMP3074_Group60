@@ -1,21 +1,69 @@
-import type { ReactNode } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState, type ReactNode } from 'react';
+import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/Icon';
+import { LoadingState } from '@/components/ScreenState';
 import { useTabBarInset } from '@/components/TabBar';
 import { AppButton, Card, ProgressSegments } from '@/components/ui';
 import { identityOf, useAuth } from '@/data/auth';
 import { usePickups } from '@/data/pickups';
 import { colors, fonts, tabular, type } from '@/theme';
 
+const NOT_SET = '—'; // what the pickups store gives when the driver document has no value
+
+// Asks before signing out. React Native Web's Alert does nothing, so the browser's dialog is used there.
+function confirmSignOut(pendingCount: number): Promise<boolean> {
+  const message =
+    pendingCount > 0
+      ? `${pendingCount} ${pendingCount === 1 ? "update hasn't" : "updates haven't"} synced yet. ${
+          pendingCount === 1 ? "It'll" : "They'll"
+        } stay on this phone and send next time you sign in.`
+      : "You'll need your email and password to sign back in.";
+  if (Platform.OS === 'web') return Promise.resolve(window.confirm(`Sign out?\n\n${message}`));
+  return new Promise((resolve) =>
+    Alert.alert(
+      'Sign out?',
+      message,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Sign out', style: 'destructive', onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    ),
+  );
+}
+
+function showError(message: string) {
+  if (Platform.OS === 'web') window.alert(message);
+  else Alert.alert("Couldn't sign out", message);
+}
+
 // Screen 6 · Profile
 export default function ProfileScreen() {
-  const { pickups, lastSynced, driver, error, online, pendingCount } = usePickups();
+  const { pickups, lastSynced, driver, loading, error, online, pendingCount } = usePickups();
   const { user, signOut } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
   const tabInset = useTabBarInset();
   const { name, initials } = identityOf(user);
+  const email = user?.email ?? null;
   const done = pickups.filter((p) => p.status === 'completed').length;
+
+  const truckValue =
+    driver.truck === NOT_SET ? 'Not assigned' : [driver.truck, driver.truckType].filter(Boolean).join(' · ');
+  const shiftValue = `${driver.date} · ${driver.shift === NOT_SET ? 'Not assigned' : driver.shift}`;
+
+  const onSignOut = async () => {
+    if (!(await confirmSignOut(pendingCount))) return;
+    setSigningOut(true);
+    try {
+      await signOut();
+    } catch {
+      showError('Something went wrong. Try again.');
+    } finally {
+      setSigningOut(false);
+    }
+  };
   const syncedAt = lastSynced
     ? `${String(lastSynced.getHours()).padStart(2, '0')}:${String(lastSynced.getMinutes()).padStart(2, '0')}`
     : null;
@@ -73,8 +121,13 @@ export default function ProfileScreen() {
           <View style={styles.avatar} importantForAccessibility="no">
             <Text style={styles.avatarText}>{initials}</Text>
           </View>
-          <View style={{ gap: 4 }}>
+          <View style={{ flex: 1, gap: 4 }}>
             <Text style={styles.name}>{name}</Text>
+            {email && email !== name && (
+              <Text style={styles.email} numberOfLines={1}>
+                {email}
+              </Text>
+            )}
             <View style={styles.roleTag}>
               <Text style={styles.roleText}>Driver</Text>
             </View>
@@ -82,10 +135,14 @@ export default function ProfileScreen() {
         </View>
 
         <Card>
-          <InfoRow icon="truck" label="Assigned truck" value={`${driver.truck} · ${driver.truckType}`} />
-          <InfoRow icon="clock" label="Shift" value={`${driver.date} · ${driver.shift}`} />
-          <InfoRow icon="list" label="Today" value={`${pickups.length} pickups · ${done} done`} last>
-            <ProgressSegments pickups={pickups} height={6} gap={3} />
+          <InfoRow icon="truck" label="Assigned truck" value={truckValue} />
+          <InfoRow icon="clock" label="Shift" value={shiftValue} />
+          <InfoRow icon="list" label="Today" value={loading ? null : `${pickups.length} pickups · ${done} done`} last>
+            {loading ? (
+              <LoadingState label="Loading pickups…" compact />
+            ) : (
+              pickups.length > 0 && <ProgressSegments pickups={pickups} height={6} gap={3} />
+            )}
           </InfoRow>
         </Card>
 
@@ -99,7 +156,13 @@ export default function ProfileScreen() {
 
         <View style={{ flex: 1, minHeight: 24 }} />
 
-        <AppButton label="Sign out" icon="logout" variant="outline" onPress={() => void signOut()} />
+        <AppButton
+          label={signingOut ? 'Signing out…' : 'Sign out'}
+          icon="logout"
+          variant="outline"
+          loading={signingOut}
+          onPress={() => void onSignOut()}
+        />
       </ScrollView>
     </SafeAreaView>
   );
@@ -114,7 +177,8 @@ function InfoRow({
 }: {
   icon: IconName;
   label: string;
-  value: string;
+  /** null hides the value line (e.g. while it's loading and a child shows that instead). */
+  value: string | null;
   last?: boolean;
   children?: ReactNode;
 }) {
@@ -124,7 +188,7 @@ function InfoRow({
       <View style={{ flex: 1, gap: 6 }}>
         <View>
           <Text style={type.label}>{label}</Text>
-          <Text style={[styles.infoValue, tabular]}>{value}</Text>
+          {value !== null && <Text style={[styles.infoValue, tabular]}>{value}</Text>}
         </View>
         {children}
       </View>
@@ -147,6 +211,7 @@ const styles = StyleSheet.create({
   },
   avatarText: { fontFamily: fonts.condBold, fontSize: 28, color: colors.hiVis },
   name: { fontFamily: fonts.bold, fontSize: 24, lineHeight: 27, color: colors.ink },
+  email: { fontFamily: fonts.regular, fontSize: 15, color: colors.muted },
   roleTag: {
     alignSelf: 'flex-start',
     paddingVertical: 3,
