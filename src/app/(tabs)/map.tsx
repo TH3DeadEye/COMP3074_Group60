@@ -95,7 +95,9 @@ export default function MapScreen() {
         showsMyLocationButton={false}
         showsCompass={false}
         toolbarEnabled={false}
-        mapPadding={{ top: 0, right: 0, bottom: sheetH, left: 0 }}
+        // Setting padding before the native map exists is a known cause of the Android
+        // "Attempt to invoke virtual method ... on a null object reference" crash.
+        mapPadding={mapReady ? { top: 0, right: 0, bottom: sheetH, left: 0 } : undefined}
         onMapReady={() => setMapReady(true)}
         accessibilityLabel="Map of today's stops"
       >
