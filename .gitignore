@@ -47,3 +47,6 @@ yarn-error.*
 
 # Firebase config, each developer gets it from the Firebase console
 google-services.json
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

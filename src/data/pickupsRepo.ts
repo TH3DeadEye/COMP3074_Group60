@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   query,
   serverTimestamp,
   setDoc,
@@ -28,7 +29,7 @@ import { DEMO_DRIVER, SEED_PICKUPS } from './seed';
 //
 // Collections:
 //   drivers/{uid}             truck, shift, ...                     (one per driver)
-//   pickups/{id}              a pickup; drivers may change only status and updatedAt
+//   pickups/{id}              a pickup, with the ID and server time of the latest status change
 //   pickupEvents/{id}         the audit log: one immutable row per status change
 
 export type PickupBase = Omit<Pickup, 'history'>;
@@ -118,9 +119,14 @@ export function historyByPickup(events: PickupEvent[]): Map<string, HistoryEntry
  * The security rules only let a driver touch their own pickups and only append events.
  */
 export async function commitUpdate(db: Firestore, who: Who, update: StatusUpdate) {
+  const eventRef = doc(db, 'pickupEvents', update.id);
   const batch = writeBatch(db);
-  batch.update(doc(db, 'pickups', update.pickupId), { status: update.status, updatedAt: serverTimestamp() });
-  batch.set(doc(db, 'pickupEvents', update.id), {
+  batch.update(doc(db, 'pickups', update.pickupId), {
+    status: update.status,
+    updatedAt: serverTimestamp(),
+    lastEventId: update.id,
+  });
+  batch.set(eventRef, {
     pickupId: update.pickupId,
     driverUid: who.uid,
     date: update.date,
@@ -131,7 +137,23 @@ export async function commitUpdate(db: Firestore, who: Who, update: StatusUpdate
     clientAt: update.clientAt,
     at: serverTimestamp(),
   });
-  await batch.commit();
+  try {
+    await batch.commit();
+  } catch (error) {
+    if (typeof error !== 'object' || !error || !('code' in error) || error.code !== 'permission-denied') {
+      throw error;
+    }
+    // A write may have reached Firestore before the phone timed out or restarted. Its immutable
+    // audit row proves the exact queued operation was already applied.
+    const existing = (await getDocFromServer(eventRef).catch(() => null))?.data();
+    if (
+      existing?.byUid !== who.uid || existing.pickupId !== update.pickupId || existing.date !== update.date ||
+      existing.status !== update.status || existing.clientAt !== update.clientAt ||
+      existing.detail !== (update.detail ?? null)
+    ) {
+      throw error;
+    }
+  }
 }
 
 /** Creates the driver's profile document if it doesn't exist yet (it can't be changed later). */

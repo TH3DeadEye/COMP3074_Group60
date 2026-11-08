@@ -49,7 +49,9 @@ export default function TodayScreen() {
       ? { label: `${pendingCount} waiting`, icon: 'clock', bg: colors.note, fg: colors.noteInk }
       : !online
         ? { label: 'Offline', icon: 'alert', bg: '#E6E8EC', fg: '#3A4250' }
-        : { label: 'Synced', icon: 'check', bg: colors.successBg, fg: colors.success };
+        : error
+          ? { label: 'Check sync', icon: 'alert', bg: colors.dangerBg, fg: colors.danger }
+          : { label: 'Synced', icon: 'check', bg: colors.successBg, fg: colors.success };
 
   const openPickup = (p: Pickup) => router.push({ pathname: '/pickup/[id]', params: { id: p.id } });
 

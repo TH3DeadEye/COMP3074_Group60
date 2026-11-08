@@ -30,6 +30,7 @@ import {
 } from './pickupsRepo';
 import { loadQueue, saveQueue } from './queueStorage';
 import { applyQueue, drainQueue, withTimeout } from './syncQueue';
+import { canTransitionTo, isValidStatusDetail } from './transitions';
 import { useOnline } from './useOnline';
 
 export type { DriverInfo, HistoryEntry, JobType, Pickup, PickupStatus } from './model';
@@ -52,7 +53,7 @@ type Store = {
    * Records a status change for one of today's pickups. It shows on screen immediately and is
    * saved on the phone, then sent (with an audit-log entry) as soon as there's a connection.
    */
-  updateStatus: (id: string, status: PickupStatus, detail?: string) => void;
+  updateStatus: (id: string, status: PickupStatus, detail?: string) => boolean;
   driver: DriverInfo;
   /** True until the first batch of pickups has arrived. */
   loading: boolean;
@@ -128,6 +129,8 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
   const [queueState, setQueueState] = useState<QueueState>({ uid: null, items: NO_QUEUE });
   const [flushing, setFlushing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [listenAttempt, setListenAttempt] = useState(0);
+  const [rejectedOwner, setRejectedOwner] = useState<string | null>(null);
 
   // Latest values for callbacks that outlive a render (listeners, timers, the sender).
   const live = useRef({ uid, name, online });
@@ -178,13 +181,18 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
         isOnline: () => live.current.online && live.current.uid === owner,
         peek: () => queueRef.current[0],
         commit: (update) => commitUpdate(db, { uid: owner, name: live.current.name }, update),
-        remove: (id) => changeQueue((q) => q.filter((u) => u.id !== id)),
+        remove: (id) => {
+          if (live.current.uid === owner) changeQueue((q) => q.filter((u) => u.id !== id));
+        },
         timeoutMs: COMMIT_TIMEOUT_MS,
         onDropped: (update, e) => {
           if (__DEV__) console.warn('The server rejected a queued update, dropping it:', update, e);
+          if (live.current.uid === owner) setRejectedOwner(owner);
         },
       });
-      if (result.sent > 0) setRemote((prev) => patch(prev, owner, { lastServerSync: new Date(), error: null }));
+      if (result.sent > 0 && live.current.uid === owner) {
+        setRemote((prev) => patch(prev, owner, { lastServerSync: new Date(), error: null }));
+      }
     } finally {
       sending.current = false;
       setFlushing(false);
@@ -240,11 +248,16 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
 
     const unsubPickups = onSnapshot(
       pickupsQuery(db, uid, today),
+      { includeMetadataChanges: true },
       (snap) => {
-        const fromServer = !snap.metadata.fromCache;
+        const fromServer = !snap.metadata.fromCache && !snap.metadata.hasPendingWrites;
         setRemote((prev) =>
           patch(prev, uid, {
-            pickups: snap.docs.map((d) => parsePickup(d.id, d.data())),
+            pickups: snap.docs.map((d) => {
+              // The queue renders our own writes until Firestore acknowledges them.
+              const known = d.metadata.hasPendingWrites && prev.uid === uid && prev.pickups?.find((p) => p.id === d.id);
+              return known || parsePickup(d.id, d.data());
+            }),
             pendingWrites: snap.metadata.hasPendingWrites,
             error: null,
             ...(fromServer ? { lastServerSync: new Date() } : {}),
@@ -257,7 +270,10 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
     );
     const unsubEvents = onSnapshot(
       eventsQuery(db, uid, today),
-      (snap) => setRemote((prev) => patch(prev, uid, { events: snap.docs.map((d) => parseEvent(d.id, d.data())) })),
+      { includeMetadataChanges: true },
+      (snap) => setRemote((prev) => patch(prev, uid, {
+        events: snap.docs.filter((d) => !d.metadata.hasPendingWrites).map((d) => parseEvent(d.id, d.data())),
+      })),
       fail,
     );
     const unsubDriver = onSnapshot(
@@ -271,17 +287,15 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
       unsubEvents();
       unsubDriver();
     };
-  }, [uid, today]);
+  }, [uid, today, listenAttempt]);
 
   /* ---------- what the screens see ---------- */
 
   const view = remote.uid === uid ? remote : emptyRemote(uid);
 
   // Queued updates the server already has (sent, but not yet removed from the queue) would show twice.
-  const waiting = useMemo(() => {
-    const onServer = new Set(view.events.map((e) => e.id));
-    return queued.filter((u) => !onServer.has(u.id));
-  }, [queued, view.events]);
+  const eventIds = useMemo(() => new Set(view.events.map((e) => e.id)), [view.events]);
+  const waiting = useMemo(() => queued.filter((u) => !eventIds.has(u.id)), [queued, eventIds]);
 
   const pickups = useMemo<Pickup[]>(() => {
     const history = historyByPickup(view.events);
@@ -293,18 +307,20 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     if (!uid || !live.current.online) return;
+    setRejectedOwner(null);
+    if (view.error) setListenAttempt((attempt) => attempt + 1);
     setRefreshing(true);
     try {
       await send();
       // Succeeds only if the server answers, which also proves we're really online.
       await withTimeout(getDocsFromServer(pickupsQuery(db, uid, today)), 8_000);
-      setRemote((prev) => patch(prev, uid, { lastServerSync: new Date() }));
-    } catch {
-      // Couldn't reach the server: keep showing what we have.
+      if (live.current.uid === uid) setRemote((prev) => patch(prev, uid, { lastServerSync: new Date() }));
+    } catch (error) {
+      if (live.current.uid === uid) setRemote((prev) => patch(prev, uid, { error: describeError(error) }));
     } finally {
       setRefreshing(false);
     }
-  }, [uid, today, send]);
+  }, [uid, today, send, view.error]);
 
   const driverDoc = view.driverDoc;
   const driver = useMemo<DriverInfo>(
@@ -326,11 +342,21 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
       pickups,
       getPickup: (id) => pickups.find((p) => p.id === id),
       nextPickup: pickups.find((p) => p.status === 'in_progress' || p.status === 'scheduled'),
-      updateStatus: (id, status, detail) =>
-        changeQueue((q) => [...q, { id: newId(), pickupId: id, date: today, status, detail, clientAt: Date.now() }]),
+      updateStatus: (id, status, detail) => {
+        if (!queueReady || live.current.uid !== uid || !isValidStatusDetail(status, detail)) return false;
+        const pickup = pickups.find((p) => p.id === id);
+        if (!pickup) return false;
+        // A second action can arrive before React has rendered the previous queue change.
+        const pending = queueRef.current.filter((u) => u.pickupId === id && !eventIds.has(u.id));
+        const [current] = applyQueue([pickup], pending, name);
+        if (!canTransitionTo(current.status, status)) return false;
+        changeQueue((q) => [...q, { id: newId(), pickupId: id, date: today, status, detail, clientAt: Date.now() }]);
+        setRejectedOwner(null);
+        return true;
+      },
       driver,
       loading: uid !== null && view.pickups === null && view.error === null,
-      error: view.error,
+      error: view.error ?? (uid && rejectedOwner === uid ? 'A status update was rejected. Check the pickup’s current status.' : null),
       lastSynced: view.lastServerSync,
       online,
       pendingCount: waiting.length,
@@ -343,6 +369,10 @@ export function PickupsProvider({ children }: { children: ReactNode }) {
       uid,
       today,
       changeQueue,
+      eventIds,
+      name,
+      queueReady,
+      rejectedOwner,
       view.pickups,
       view.error,
       view.lastServerSync,

@@ -37,19 +37,19 @@ npm run android
 ```
 ## Google Maps setup
 
-The Route Map and ETAs need a Google Maps key (one shared key is fine for the team).
+The Route Map needs a Maps SDK for Android key. The Google Cloud project owner can use the team's existing Maps project or create a project with billing enabled.
 
-1. Create a Google Cloud project and enable **Maps SDK for Android** and **Routes API**.
-2. Create an API key. Restrict it to Android apps: package `com.group60.dumplodriver` and the SHA-1 of `android/app/debug.keystore`. Restrict it to those two APIs.
-3. Create `.env.local` in the project root (it is gitignored, never commit it):
-   ```
+1. Enable **Maps SDK for Android** in the project. See [Google's Android Maps setup](https://developers.google.com/maps/documentation/android-sdk/get-api-key).
+2. In **APIs & Services → Credentials**, create or select the team's Maps key. Set **Application restrictions** to **Android apps**. Add package `com.group60.dumplodriver` and SHA-1 `5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25` from the shared debug keystore. Set **API restrictions** to **Maps SDK for Android**.
+3. Add the key to the gitignored `.env.local` in the project root.
+   ```bash
    EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=your_key_here
    ```
-4. Rebuild the native app: `npm run android`. The key is baked into the Android manifest at build time, so reloading Metro is not enough.
-5. Everyone must use the shared `debug.keystore`, otherwise Google rejects the key and the ETA falls back to a straight-line estimate.
+4. Run `npm run android` to rebuild the manifest and verify that map tiles and the pickup preview load. Use the shared `android/app/debug.keystore` for debug builds.
 
-Maps do not run in Expo Go or on web. Use `npm run android`.
+The next-stop card shows a distance-based estimate if the Routes API is unavailable. For a traffic-aware ETA, enable **Routes API** for the prototype key only after checking that the endpoint accepts the team's app and certificate and rejects an incorrect package or certificate. See [Google's mobile web-service key guidance](https://developers.google.com/maps/api-security-best-practices#secure-client-side-web-service-calls).
 
+Use the native Android build for Google Maps. The browser shows a stop list with directions links.
 
 ## Liquid glass
 
@@ -70,11 +70,11 @@ Each signed-in driver only ever sees their own data, and the app updates live wh
 | Collection | What it holds | What a driver can do |
 | --- | --- | --- |
 | `drivers/{uid}` | truck, truck type, shift | read |
-| `pickups/{id}` | one pickup for one day | read; change `status` only |
+| `pickups/{id}` | one pickup for one day | read; change status with a matching audit event |
 | `pickupEvents/{id}` | the audit log: one row per status change (who, what, when) | read; add rows, never edit or delete |
 
 - **First sign-in:** if a driver has no pickups for today, the app files six demo pickups and their starting history under their account. This is a stand-in for dispatch. The `create` rules for `drivers` and `pickups` exist only for this and would be removed once a back end creates pickups.
-- **Status changes:** marking a pickup in progress, completed or missed updates the pickup and adds an audit-log row in a single atomic write. The pickup's "Status history" is built from those rows.
+- **Status changes:** Scheduled pickups can move to In progress or Missed. In progress pickups can move to Completed or Missed. Completed, Missed and Cancelled are final. Missed requires a reason, and any status note is limited to 200 characters. Firestore checks the transition and its matching audit entry together. Pickup Details reads these entries as status history.
 - **Offline:** a status change is saved on the phone first and shown straight away, marked "Waiting to sync". It is sent as soon as there is a connection, oldest first, even if the app was closed in between. Each change keeps the time the driver made it, and sending the same change twice can't create a duplicate audit row. The Today chip shows "N waiting" or "Offline", and the Profile card explains the state. Signing out with changes still waiting keeps them for that account's next sign-in.
 
 ## Scripts
@@ -86,6 +86,30 @@ Each signed-in driver only ever sees their own data, and the app updates live wh
 | `npm run web` | Run in the browser |
 | `npm run typecheck` | Type-check with `tsc` |
 | `npm run lint` | Lint with ESLint |
+| `npm test` | Run unit tests for statuses and the offline queue |
+| `npm run test:rules` | Run Firestore rule tests with a local emulator |
+
+## Test plan
+
+Run the automated checks from the project root. The rules tests use the disposable `demo-dumplo` project in the emulator.
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+npx firebase-tools emulators:exec --only firestore --project demo-dumplo "npm run test:rules"
+```
+
+For an Android demo build, run these checks with a test account.
+
+| Area | Check |
+| --- | --- |
+| Today and Profile | Confirm the current date, status totals and driver email. Pull down to refresh. Check loading, empty and error states. Cancel sign-out, then confirm it and verify the app returns to Login. Check 48 dp touch targets and contrast with larger text and glass effects enabled. |
+| Pickup Details | Open a Scheduled pickup. Confirm the sheet offers In progress and Missed. Verify the reason and 200-character note limit, mark it Missed, then verify the update button stays disabled and history shows the reason. Repeat with In progress → Completed. |
+| Route map | Deny and then grant location permission. Verify the driver's dot, recentering, numbered status markers, map preview and next-stop ETA. Test Navigate with and without the Google Maps app. |
+| Auth and sync | Try invalid credentials, then sign in with a test driver. Go offline, update a pickup and relaunch. Confirm the pending count, reconnect, then verify the count clears and history has one entry. Confirm a second account only sees its own pickups. |
+
+Release the updated app and `firestore.rules` together. The rules require the audit event ID written by this version when a driver changes status.
 
 ## Screens
 

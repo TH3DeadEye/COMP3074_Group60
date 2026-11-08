@@ -11,6 +11,44 @@ service cloud.firestore {
       return s in ['scheduled', 'in_progress', 'completed', 'missed', 'cancelled'];
     }
 
+    // Keep this in step with src/data/transitions.ts.
+    function canTransition(from, to) {
+      return (from == 'scheduled' && to in ['in_progress', 'missed'])
+          || (from == 'in_progress' && to in ['completed', 'missed']);
+    }
+
+    function validStatusDetail(status, detail) {
+      return status == 'missed'
+        ? detail is string
+          && detail.matches('(?s)^(No access|Blocked bin|Customer not ready|Truck breakdown|Other)( — .{1,200})?$')
+        : detail == null || (detail is string && detail.size() <= 200);
+    }
+
+    function hasLinkedEvent(pickupId) {
+      let next = request.resource.data;
+      let event = getAfter(/databases/$(database)/documents/pickupEvents/$(next.lastEventId)).data;
+      return event.pickupId == pickupId
+          && event.driverUid == request.auth.uid
+          && event.date == next.date
+          && event.status == next.status
+          && event.at == request.time;
+    }
+
+    function isSeedEvent(eventId, event, pickup) {
+      return (eventId == event.pickupId + '_e0' && event.status == 'scheduled')
+          || (eventId == event.pickupId + '_e1' && event.status == 'completed' && pickup.status == 'completed');
+    }
+
+    function matchesPickup(eventId, event) {
+      let path = /databases/$(database)/documents/pickups/$(event.pickupId);
+      let pickup = getAfter(path).data;
+      return pickup.driverUid == request.auth.uid && pickup.date == event.date
+          && (exists(path)
+            ? pickup.lastEventId == eventId && pickup.status == event.status
+              && pickup.updatedAt == request.time && validStatusDetail(event.status, event.detail)
+            : isSeedEvent(eventId, event, pickup));
+    }
+
     // A driver's profile (truck, shift). Readable by its owner; written once, then frozen.
     // Creating it is allowed because there is no dispatch back end yet: the app files the
     // demo profile on a driver's first sign-in. A real deployment would write it with the
@@ -31,13 +69,14 @@ service cloud.firestore {
                     && request.resource.data.driverUid == request.auth.uid
                     && validStatus(request.resource.data.status);
 
-      // The only thing a driver can change on a pickup is its status, and it must be stamped
-      // with the server time.
+      // A driver can move a pickup forward only in the same write as its audit row.
       allow update: if signedIn()
                     && resource.data.driverUid == request.auth.uid
-                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
-                    && validStatus(request.resource.data.status)
-                    && request.resource.data.updatedAt == request.time;
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'lastEventId'])
+                    && canTransition(resource.data.status, request.resource.data.status)
+                    && request.resource.data.updatedAt == request.time
+                    && request.resource.data.lastEventId is string
+                    && hasLinkedEvent(pickupId);
 
       allow delete: if false;
     }
@@ -51,9 +90,7 @@ service cloud.firestore {
                     && request.resource.data.byUid == request.auth.uid
                     && validStatus(request.resource.data.status)
                     && request.resource.data.at == request.time
-                    // The event must be about one of this driver's own pickups. getAfter() sees
-                    // pickups created in the same batch, so the first-sign-in seed works.
-                    && getAfter(/databases/$(database)/documents/pickups/$(request.resource.data.pickupId)).data.driverUid == request.auth.uid;
+                    && matchesPickup(eventId, request.resource.data);
 
       allow update, delete: if false;
     }

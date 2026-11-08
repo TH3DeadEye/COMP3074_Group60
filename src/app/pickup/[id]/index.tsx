@@ -4,28 +4,37 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { Icon } from '@/components/Icon';
 import { PickupMapPreview } from '@/components/PickupMapPreview';
+import { ErrorBanner, LoadingState } from '@/components/ScreenState';
 import { AppButton, Card, JobTag, StatusChip } from '@/components/ui';
 import { jobLabel, usePickups } from '@/data/pickups';
+import { isFinal } from '@/data/transitions';
 import { openNavigation } from '@/lib/navigation';
 import { colors, fonts, tabular, type } from '@/theme';
 
 // Screen 3 · Pickup Details
 export default function PickupDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { pickups, getPickup, driver } = usePickups();
+  const { pickups, getPickup, driver, loading, error, refresh } = usePickups();
   const insets = useSafeAreaInsets();
   const pickup = getPickup(id);
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace('/today'));
 
   if (!pickup) {
     return (
       <SafeAreaView style={[styles.screen, { alignItems: 'center', justifyContent: 'center', gap: 16 }]}>
-        <Text style={type.body}>Pickup not found.</Text>
-        <AppButton label="Back to today" onPress={() => router.back()} />
+        {loading ? (
+          <LoadingState label="Loading pickup…" />
+        ) : error ? (
+          <ErrorBanner message={error} onRetry={() => void refresh()} />
+        ) : (
+          <Text style={type.body}>Pickup not found.</Text>
+        )}
+        <AppButton label="Back to today" onPress={goBack} />
       </SafeAreaView>
     );
   }
 
-  const closed = pickup.status === 'completed' || pickup.status === 'cancelled';
+  const closed = isFinal(pickup.status);
 
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
@@ -33,7 +42,7 @@ export default function PickupDetailsScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Back"
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/today'))}
+          onPress={goBack}
           style={styles.backButton}
         >
           <Icon name="back" size={24} color={colors.ink} strokeWidth={2.2} />
@@ -45,6 +54,7 @@ export default function PickupDetailsScreen() {
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {error && <ErrorBanner message={error} onRetry={() => void refresh()} />}
         <View style={{ gap: 8, paddingHorizontal: 4 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <StatusChip status={pickup.status} />
