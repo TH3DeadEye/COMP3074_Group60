@@ -1,18 +1,24 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Glass } from '@/components/Glass';
 import { Icon, type IconName } from '@/components/Icon';
 import { useTabBarInset } from '@/components/TabBar';
 import { AppButton, Card, JobTag, ProgressSegments, StatusChip } from '@/components/ui';
-import { navigationUrl, usePickups, type Pickup } from '@/data/pickups';
+import { usePickups, type Pickup } from '@/data/pickups';
+import { useDriverLocation } from '@/lib/location';
+import { formatEta, openNavigation, useEta } from '@/lib/navigation';
 import { colors, fonts, tabular, type } from '@/theme';
 
 // Screen 2 · Today's Pickups
 export default function TodayScreen() {
   const { pickups, nextPickup, refresh, driver, syncing, loading, error, online, pendingCount } = usePickups();
+  const { coords: me } = useDriverLocation();
+  const etaResult = useEta(me, nextPickup?.coords);
+  const eta = formatEta(etaResult);
+
   const [showCompleted, setShowCompleted] = useState(false);
   const tabInset = useTabBarInset();
 
@@ -112,6 +118,17 @@ export default function TodayScreen() {
                 {nextPickup.address} · {nextPickup.material}
               </Text>
             </View>
+            {me && nextPickup.coords && (
+            <View
+                 style={{ flexDirection: 'row', alignItems: 'baseline', gap: 14 }}
+                accessibilityLabel={`${eta.km} kilometres, about ${eta.min} minutes`}
+              >
+                <Text style={[styles.upNextEta, tabular]}>{eta.km} km</Text>
+                <Text style={[styles.upNextEta, tabular]}>~{eta.min} min</Text>
+                {etaResult?.approx && <Text style={styles.upNextEtaNote}>estimate</Text>}
+              </View>
+              )}
+
             {nextPickup.note && (
               <View style={styles.upNextNote}>
                 <Icon name="note" size={20} color={colors.hiVis} />
@@ -126,7 +143,7 @@ export default function TodayScreen() {
                 icon="navigate"
                 variant="hiVis"
                 style={{ flex: 1 }}
-                onPress={() => Linking.openURL(navigationUrl(nextPickup))}
+                onPress={() => openNavigation(nextPickup)}
               />
               <AppButton
                 label="Open"
@@ -275,6 +292,9 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingBottom: 20, gap: 12 },
   upNext: { backgroundColor: colors.ink, borderRadius: 20, padding: 18, gap: 14 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  upNextEta: { fontFamily: fonts.condBold, fontSize: 26, color: colors.hiVis },
+  upNextEtaNote: { fontFamily: fonts.medium, fontSize: 14, color: colors.surface, opacity: 0.7 },
+
   upNextLabel: {
     fontFamily: fonts.bold,
     fontSize: 13,

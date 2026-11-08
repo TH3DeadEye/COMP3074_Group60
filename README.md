@@ -9,7 +9,8 @@ This is a prototype. Sign-in uses Firebase Authentication (email and password) a
 - Expo + React Native
 - TypeScript
 - Expo Router (file-based routing)
-- react-native-svg for icons and the route map
+- react-native-svg for icons
+- react-native-maps (Google Maps) and expo-location for the route map
 - Firebase Authentication and Cloud Firestore (JS SDK)
 
 ## Getting started
@@ -34,6 +35,21 @@ To build and run the native Android app:
 ```bash
 npm run android
 ```
+## Google Maps setup
+
+The Route Map and ETAs need a Google Maps key (one shared key is fine for the team).
+
+1. Create a Google Cloud project and enable **Maps SDK for Android** and **Routes API**.
+2. Create an API key. Restrict it to Android apps: package `com.group60.dumplodriver` and the SHA-1 of `android/app/debug.keystore`. Restrict it to those two APIs.
+3. Create `.env.local` in the project root (it is gitignored, never commit it):
+   ```
+   EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=your_key_here
+   ```
+4. Rebuild the native app: `npm run android`. The key is baked into the Android manifest at build time, so reloading Metro is not enough.
+5. Everyone must use the shared `debug.keystore`, otherwise Google rejects the key and the ETA falls back to a straight-line estimate.
+
+Maps do not run in Expo Go or on web. Use `npm run android`.
+
 
 ## Liquid glass
 

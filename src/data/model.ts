@@ -1,6 +1,8 @@
 export type PickupStatus = 'scheduled' | 'in_progress' | 'completed' | 'missed' | 'cancelled';
 export type JobType = 'SWAP' | 'DROP' | 'COLLECT';
 
+export type LatLng = { latitude: number; longitude: number };
+
 export type HistoryEntry = { title: string; meta: string };
 
 export type Pickup = {
@@ -15,7 +17,9 @@ export type Pickup = {
   note?: string;
   status: PickupStatus;
   history: HistoryEntry[];
-  // Marker position on the mock route map, in the map's 390×764 design space.
+  /** Where the stop is. Undefined if dispatch didn't give coordinates; the map then skips the marker. */
+  coords?: LatLng;
+  // Marker position on the old mock route map. No longer drawn; kept until dispatch stops sending it.
   map: { x: number; y: number };
 };
 
