@@ -6,6 +6,21 @@ import type { PickupStatus } from './model';
 /** The statuses a driver can set. (Scheduled and Cancelled are only ever set by dispatch.) */
 export type DriverStatus = 'in_progress' | 'completed' | 'missed';
 
+export const STATUS_NOTE_LIMIT = 200;
+export const MISSED_REASONS = ['No access', 'Blocked bin', 'Customer not ready', 'Truck breakdown', 'Other'] as const;
+
+/** The queue and audit log share the same detail format, including entries saved by older builds. */
+export function isValidStatusDetail(status: PickupStatus, detail?: string | null): boolean {
+  if (status !== 'missed') return detail == null || detail.length <= STATUS_NOTE_LIMIT;
+  if (!detail) return false;
+  return MISSED_REASONS.some((reason) => {
+    const prefix = reason + ' — ';
+    return detail === reason || (
+      detail.startsWith(prefix) && detail.length > prefix.length && detail.length <= prefix.length + STATUS_NOTE_LIMIT
+    );
+  });
+}
+
 // Which status a pickup can move to from each status. A driver only moves a pickup forward:
 //
 //   scheduled   → in progress, or missed

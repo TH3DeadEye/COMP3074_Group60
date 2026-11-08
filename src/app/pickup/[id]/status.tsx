@@ -13,21 +13,18 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/Icon';
+import { ErrorBanner } from '@/components/ScreenState';
 import { AppButton, SheetHandle, statusColors } from '@/components/ui';
-import { usePickups, type PickupStatus } from '@/data/pickups';
+import { statusTitle } from '@/data/model';
+import { usePickups } from '@/data/pickups';
+import { MISSED_REASONS, nextStatuses, STATUS_NOTE_LIMIT, type DriverStatus } from '@/data/transitions';
 import { colors, fonts } from '@/theme';
 
-const reasons = [
-  { id: 'no_access', label: 'No access' },
-  { id: 'blocked_bin', label: 'Blocked bin' },
-  { id: 'customer_not_ready', label: 'Customer not ready' },
-  { id: 'truck_breakdown', label: 'Truck breakdown' },
-  { id: 'other', label: 'Other' },
-] as const;
-
-type ReasonId = (typeof reasons)[number]['id'];
-
-const NOTE_MAX = 200;
+const options: Record<DriverStatus, { hint: string; icon: IconName; confirm: string }> = {
+  in_progress: { hint: "I'm on site", icon: 'play', confirm: 'Confirm · Start job' },
+  completed: { hint: 'Job done', icon: 'check', confirm: 'Confirm · Complete job' },
+  missed: { hint: "Can't do this one", icon: 'x', confirm: 'Confirm · Mark missed' },
+};
 
 // Screen 5 · Update Status (bottom sheet over Pickup Details)
 export default function UpdateStatusSheet() {
@@ -36,33 +33,24 @@ export default function UpdateStatusSheet() {
   const insets = useSafeAreaInsets();
   const pickup = getPickup(id);
 
-  // Once a job is in progress, the "go" option becomes Completed.
-  const forward: PickupStatus = pickup?.status === 'in_progress' ? 'completed' : 'in_progress';
-  const [choice, setChoice] = useState<PickupStatus | null>(null);
-  const [reason, setReason] = useState<ReasonId | null>(null);
+  const [choice, setChoice] = useState<DriverStatus | null>(null);
+  const [reason, setReason] = useState<(typeof MISSED_REASONS)[number] | null>(null);
   const [note, setNote] = useState('');
+  const [saveError, setSaveError] = useState(false);
 
   if (!pickup) return null;
 
   const close = () => router.back();
-  const missedSelected = choice === 'missed';
-  const canConfirm = choice !== null && (!missedSelected || reason !== null);
-
-  const confirmLabel =
-    choice === 'missed'
-      ? 'Confirm · Mark missed'
-      : choice === 'completed'
-        ? 'Confirm · Complete job'
-        : choice === 'in_progress'
-          ? 'Confirm · Start job'
-          : 'Choose a status';
+  const allowed = nextStatuses(pickup.status);
+  const selected = choice && allowed.includes(choice) ? choice : null;
+  const missedSelected = selected === 'missed';
+  const canConfirm = selected !== null && (!missedSelected || reason !== null);
 
   const confirm = () => {
-    if (!choice || !canConfirm) return;
-    const reasonLabel = reasons.find((r) => r.id === reason)?.label;
-    const detail = choice === 'missed' ? [reasonLabel, note.trim()].filter(Boolean).join(' — ') : undefined;
-    updateStatus(pickup.id, choice, detail);
-    close();
+    if (!selected || !canConfirm) return;
+    const detail = [missedSelected ? reason : null, note.trim()].filter(Boolean).join(' — ');
+    if (updateStatus(pickup.id, selected, detail || undefined)) close();
+    else setSaveError(true);
   };
 
   const currentLabel = statusColors(pickup.status).label;
@@ -90,91 +78,82 @@ export default function UpdateStatusSheet() {
             </View>
 
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              {forward === 'in_progress' ? (
+              {allowed.map((status) => (
                 <OptionCard
-                  title="In progress"
-                  hint="I'm on site"
-                  icon="play"
-                  status="in_progress"
-                  selected={choice === 'in_progress'}
-                  onPress={() => setChoice('in_progress')}
+                  key={status}
+                  title={statusTitle[status]}
+                  hint={options[status].hint}
+                  icon={options[status].icon}
+                  status={status}
+                  selected={selected === status}
+                  onPress={() => {
+                    setChoice(status);
+                    setSaveError(false);
+                  }}
                 />
-              ) : (
-                <OptionCard
-                  title="Completed"
-                  hint="Job done"
-                  icon="check"
-                  status="completed"
-                  selected={choice === 'completed'}
-                  onPress={() => setChoice('completed')}
-                />
-              )}
-              <OptionCard
-                title="Missed"
-                hint="Can't do this one"
-                icon="x"
-                status="missed"
-                selected={missedSelected}
-                onPress={() => setChoice('missed')}
-              />
+              ))}
             </View>
+            {allowed.length === 0 && <Text style={styles.subtitle}>This pickup is closed.</Text>}
 
             {missedSelected && (
-              <View style={{ gap: 16 }}>
-                <View style={{ gap: 8 }}>
-                  <Text style={styles.fieldLabel}>
-                    Why was it missed? <Text style={{ color: colors.danger }}>Required</Text>
-                  </Text>
-                  <View style={styles.reasonWrap}>
-                    {reasons.map((r) => {
-                      const sel = r.id === reason;
-                      return (
-                        <Pressable
-                          key={r.id}
-                          accessibilityRole="radio"
-                          accessibilityState={{ selected: sel }}
-                          onPress={() => setReason(r.id)}
-                          style={[
-                            styles.reason,
-                            {
-                              borderColor: sel ? colors.ink : colors.inputBorder,
-                              backgroundColor: sel ? colors.ink : colors.surface,
-                            },
-                          ]}
-                        >
-                          <Text style={[styles.reasonText, { color: sel ? colors.surface : colors.ink }]}>{r.label}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </View>
-
-                <View style={{ gap: 8 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                    <Text style={styles.fieldLabel} nativeID="noteLabel">
-                      Note <Text style={{ fontFamily: fonts.regular, color: colors.muted }}>(optional)</Text>
-                    </Text>
-                    <Text style={styles.counter}>
-                      {note.length} / {NOTE_MAX}
-                    </Text>
-                  </View>
-                  <TextInput
-                    accessibilityLabelledBy="noteLabel"
-                    value={note}
-                    onChangeText={setNote}
-                    maxLength={NOTE_MAX}
-                    multiline
-                    placeholder="Gate B locked, called site…"
-                    placeholderTextColor="#8A8F96"
-                    style={styles.textarea}
-                  />
+              <View style={{ gap: 8 }}>
+                <Text style={styles.fieldLabel}>
+                  Why was it missed? <Text style={{ color: colors.danger }}>Required</Text>
+                </Text>
+                <View style={styles.reasonWrap}>
+                  {MISSED_REASONS.map((label) => {
+                    const sel = label === reason;
+                    return (
+                      <Pressable
+                        key={label}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: sel }}
+                        onPress={() => setReason(label)}
+                        style={[
+                          styles.reason,
+                          {
+                            borderColor: sel ? colors.ink : colors.inputBorder,
+                            backgroundColor: sel ? colors.ink : colors.surface,
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.reasonText, { color: sel ? colors.surface : colors.ink }]}>{label}</Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               </View>
             )}
 
+            {selected && (
+              <View style={{ gap: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <Text style={styles.fieldLabel} nativeID="noteLabel">
+                    Note <Text style={{ fontFamily: fonts.regular, color: colors.muted }}>(optional)</Text>
+                  </Text>
+                  <Text style={styles.counter}>
+                    {note.length} / {STATUS_NOTE_LIMIT}
+                  </Text>
+                </View>
+                <TextInput
+                  accessibilityLabelledBy="noteLabel"
+                  value={note}
+                  onChangeText={setNote}
+                  maxLength={STATUS_NOTE_LIMIT}
+                  multiline
+                  placeholder="Gate B locked, called site…"
+                  placeholderTextColor="#8A8F96"
+                  style={styles.textarea}
+                />
+              </View>
+            )}
+
+            {saveError && <ErrorBanner message="The pickup changed or is still syncing. Check its status and try again." />}
             <View style={{ gap: 4 }}>
-              <AppButton label={confirmLabel} onPress={confirm} disabled={!canConfirm} />
-              <AppButton label="Cancel" variant="text" onPress={close} />
+              {allowed.length > 0 && (
+                <AppButton label={selected ? options[selected].confirm : 'Choose a status'} onPress={confirm} disabled={!canConfirm} />
+              )}
+              <AppButton label={allowed.length ? 'Cancel' : 'Close'} variant="text" onPress={close} />
             </View>
           </ScrollView>
         </View>
@@ -194,7 +173,7 @@ function OptionCard({
   title: string;
   hint: string;
   icon: IconName;
-  status: PickupStatus;
+  status: DriverStatus;
   selected: boolean;
   onPress: () => void;
 }) {

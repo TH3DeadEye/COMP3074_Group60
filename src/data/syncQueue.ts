@@ -1,4 +1,5 @@
 import { historyTitle, timeLabel, type Pickup, type StatusUpdate } from './model';
+import { canTransitionTo, isValidStatusDetail } from './transitions';
 
 // The logic behind the offline queue. No React Native or Firebase imports, so it can be tested
 // in plain Node. Storage is in queueStorage.ts and the sending is injected (see drainQueue).
@@ -16,17 +17,22 @@ export function applyQueue(pickups: Pickup[], queue: StatusUpdate[], byName: str
   return pickups.map((p) => {
     const mine = byPickup.get(p.id);
     if (!mine) return p;
-    const pending = [...mine].reverse().map((u) => ({
-      title: historyTitle(u.status, u.detail),
-      meta: `${timeLabel(u.clientAt)} · ${byName} · Waiting to sync`,
-    }));
-    return { ...p, status: mine[mine.length - 1].status, history: [...pending, ...p.history] };
+    let status = p.status;
+    const pending: Pickup['history'] = [];
+    for (const u of mine) {
+      if (!canTransitionTo(status, u.status) || !isValidStatusDetail(u.status, u.detail)) continue;
+      status = u.status;
+      pending.unshift({
+        title: historyTitle(u.status, u.detail),
+        meta: `${timeLabel(u.clientAt)} · ${byName} · Waiting to sync`,
+      });
+    }
+    return { ...p, status, history: [...pending, ...p.history] };
   });
 }
 
 // Errors where trying again would get the same answer, so the update should be dropped instead
-// of blocking everything behind it. "permission-denied" also covers an update that actually
-// reached the server on an earlier attempt: its audit row exists and rows can't be rewritten.
+// of blocking everything behind it.
 const PERMANENT = new Set(['permission-denied', 'invalid-argument', 'not-found', 'failed-precondition', 'already-exists']);
 
 export function isPermanentError(e: unknown) {
