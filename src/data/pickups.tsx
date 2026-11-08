@@ -363,4 +363,3 @@ export function usePickups() {
   if (!store) throw new Error('usePickups must be used inside PickupsProvider');
   return store;
 }
-

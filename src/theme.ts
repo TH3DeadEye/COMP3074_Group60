@@ -15,7 +15,8 @@ export const colors = {
   noteInk: '#6B4E00',
   inkRaised: '#2C3036',
   inkMuted: '#C9CCD1',
-  inkBorder: '#5A6068',
+  inkBorder: '#7A8089', // 4.5:1 on ink, so outlines on dark cards meet the 3:1 non-text minimum
+  track: '#8A877F', // empty progress segments: 3.2:1 on ground, 3.6:1 on surface
   mapGround: '#E6E3DA',
   mapPark: '#D3E2C6',
   mapWater: '#C9DCEB',
